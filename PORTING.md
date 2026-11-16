@@ -9,6 +9,9 @@ APIs, spell/talent systems, LFG internals and opcodes.
 
 The work is therefore split into independently testable phases.
 
+What is left to port, in priority order and with pointers into the AC module, is
+in [PORT_BACKLOG.md](PORT_BACKLOG.md).
+
 ## Phase 0 - Module system (DONE)
 
 * Added an AzerothCore-style module system to SkyFire (`modules/` +
