@@ -308,7 +308,18 @@ for future updates.
   or an escort; objects that only credit through a cast bar or lock; item
   objectives behind reference loot; dungeon runs without a human leader.
 * [TODO] LFR: bots fill raid finder queues (auto-accept the LFR prompt/roles).
-* [TODO] Random battlegrounds / rated battlegrounds and arenas.
+* [DONE] **Battleground and arena queues** (`BotBattlegrounds`, world thread): bots
+  take an invitation the way the client's enter-battle packet does, so a bot in
+  a real player's group enters with it. `Playerbots.RandomBotJoinBG` queues
+  random bots on both sides next to a queued real player;
+  `Playerbots.RandomBotJoinArena` forms an opposing bot team. Bots leave a
+  finished match and a queue nobody needs.
+* [DONE] **In a match** (`PlayerbotAIBattleground.cpp`): wait for the gates, walk
+  to the nearest enemy player, fight it with the normal rotations; release and
+  get up at the graveyard 30 s after dying in a battleground.
+* [TODO] Battleground objectives (flags, bases, towers, vehicles, gates): AC's
+  `BGTactics` covers the WotLK maps and is the reference; the MoP maps need their
+  own. Rated battlegrounds. Arena play beyond "attack the nearest enemy".
 * [TODO] Open-world grinding population polish (TravelNode / full quest graph still
   deferred; same-map `nc +quests` + party quest-log sync while following are in).
 

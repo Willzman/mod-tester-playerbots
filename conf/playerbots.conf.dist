@@ -123,6 +123,40 @@ Playerbots.RandomBotJoinLfg.MaxBots = 10
 
 Playerbots.RandomBotJoinLfg.LevelRange = 5
 
+#
+#    Playerbots.RandomBotJoinBG
+#        Description: When a real player queues for a battleground (a specific one
+#                     or random), ungrouped random bots of the same level bracket
+#                     queue for it on both sides, and keep the queue fed while
+#                     the player is inside. They leave the queue when no real
+#                     player is waiting or playing any more.
+#                     Bots take battleground and arena invitations whatever this
+#                     is set to, so a bot in your group enters when you queue the
+#                     group.
+#        Default:     0 - (Disabled)
+#                     1 - (Fill battlegrounds for queued players)
+
+Playerbots.RandomBotJoinBG = 0
+
+#
+#    Playerbots.RandomBotJoinBG.MaxPerTeam
+#        Description: Bots queued or playing per side, capped by the battleground's
+#                     own team size.
+#        Default:     15
+
+Playerbots.RandomBotJoinBG.MaxPerTeam = 15
+
+#
+#    Playerbots.RandomBotJoinArena
+#        Description: When a real player's group queues for an arena, random bots
+#                     of the same bracket form one team of that size and queue
+#                     against it. The team disbands after the match, or when the
+#                     player leaves the queue.
+#        Default:     0 - (Disabled)
+#                     1 - (Queue an opposing bot team)
+
+Playerbots.RandomBotJoinArena = 0
+
 ########################################
 # Bot auto-creation
 ########################################

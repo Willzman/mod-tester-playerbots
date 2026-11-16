@@ -101,6 +101,11 @@ public:
     bool GetQuestAutoPickReward() const { return _questAutoPickReward; }
     bool IsRandomBot(uint64 characterGuid) const { return _randomBots.count(characterGuid) > 0; }
 
+    // Battleground / arena fill next to a queued real player (Playerbots.RandomBotJoinBG / JoinArena).
+    bool IsJoinBgEnabled() const { return _joinBg; }
+    uint32 GetJoinBgMaxPerTeam() const { return _joinBgMaxPerTeam; }
+    bool IsJoinArenaEnabled() const { return _joinArena; }
+
     // Play-tester settings (Playerbots.Tester.* / Playerbots.Quest.TeleportDistance).
     // Active questing time without objective progress before a quest counts as stalled; 0 = never.
     uint32 GetQuestStallMs() const { return _testerQuestStallMs; }
@@ -306,6 +311,9 @@ private:
     uint32 _joinLfgMaxBots = 10;
     uint32 _joinLfgLevelRange = 5;   // |botLevel - playerLevel| must be <= this
     uint32 _lfgJoinTimer = 0;
+    bool _joinBg = false;
+    uint32 _joinBgMaxPerTeam = 15;
+    bool _joinArena = false;
 
     // Auto-creation settings.
     bool _autoCreateOnStartup = false;

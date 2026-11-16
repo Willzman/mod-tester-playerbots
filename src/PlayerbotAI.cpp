@@ -188,6 +188,8 @@ namespace
     constexpr uint32 BOT_QUEST_NPC_IGNORE_MS = 10 * MINUTE * IN_MILLISECONDS;
     // Once within this of a quest spawn, hunt/wander locally instead of re-pathing.
     constexpr float BOT_QUEST_HUNT_RADIUS = 40.0f;
+    // Enemy players this close are fought in a battleground or arena.
+    constexpr float BOT_PVP_ENGAGE_RANGE = 40.0f;
 
     // Solo idle wander: radius around the bot and pause between picks.
     constexpr float BOT_WANDER_RADIUS = 18.0f;
@@ -1387,11 +1389,12 @@ void PlayerbotAI::UpdateAI(uint32 diff)
     if (!_bot->IsAlive())
     {
         ReleaseSelfMovement();
-        if (!TryAcceptResurrect())
+        if (!TryAcceptResurrect() && !HandleBattlegroundDeath(diff))
             HandleSoloDeath(diff);
         return;
     }
     _deadMs = 0;
+    _pvpReleased = false;
 
     _updateTimer += diff;
     if (_updateTimer < BOT_AI_UPDATE_INTERVAL)
@@ -1460,6 +1463,8 @@ void PlayerbotAI::UpdateAI(uint32 diff)
         return;
 
     if (UpdateQuestTest(BOT_AI_UPDATE_INTERVAL))
+        return;
+    if (HandleBattleground(BOT_AI_UPDATE_INTERVAL))
         return;
 
     // Nearby / open-world questing (one step per tick). Skip while drinking —
@@ -2212,6 +2217,13 @@ Unit* PlayerbotAI::SelectTarget()
                 return attacker;
             }
         return nullptr;
+    }
+
+    // Battleground or arena: the nearest enemy player in reach.
+    if (Unit* enemy = SelectPvpTarget(BOT_PVP_ENGAGE_RANGE))
+    {
+        _targets.SetCurrentTarget(enemy);
+        return enemy;
     }
 
     // The tank holds the adds while everyone else brings the untanked boss down.

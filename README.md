@@ -125,7 +125,8 @@ What is **not** implemented yet (tracked in `PORTING.md`):
 * Vendor sell-junk, rest/eat/drink, gossip/quest NPC interaction.
 * Deeper per-spec combat rotations.
 * Full AC-style `co`/`nc` strategy engine, RTSC, loot-lists, item/vendor chat ops.
-* The automated LFG/LFR/RBG queue behaviour.
+* Battleground objectives (bots queue, enter and fight, but do not carry flags
+  or take bases), and the automated LFR / rated battleground queues.
 
 To try it: set `Playerbots.Enable = 1`, then `.playerbots add <charname>` for a
 character that is offline. The bot appears in the world at its saved location.

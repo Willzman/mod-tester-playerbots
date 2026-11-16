@@ -152,7 +152,9 @@ public:
     bool HasQuestsStrategyPublic() const { return _quests; }
     // Grind or auto-quest: allow OOC combat ticks to pull (needed when mobs
     // will not aggro a high-level bot in a starter zone).
-    bool WantsOpenWorldPullsPublic() const { return _grind || _quests; }
+    // In a battleground or arena the bot goes for enemy players the same way.
+    bool WantsOpenWorldPullsPublic() const { return _grind || _quests || IsInPvpMap(); }
+    bool IsInPvpMap() const;
     bool IsGroupInCombatPublic() const;
     bool ShouldFollowPublic() const;
     bool NeedsRestPublic() const;
@@ -547,6 +549,14 @@ private:
     bool TravelToQuestEnder();
     void AbandonQuest(uint32 questId);
 
+    // --- Battlegrounds and arenas (PlayerbotAIBattleground.cpp) ---
+    // Nearest enemy player the bot can see and attack, within range.
+    Unit* SelectPvpTarget(float range) const;
+    // Waits for the gates, then walks toward the nearest enemy. True when it used this tick.
+    bool HandleBattleground(uint32 elapsed);
+    // Dead in a battleground: release, then get up at the graveyard. False outside one.
+    bool HandleBattlegroundDeath(uint32 diff);
+
     // --- Objectives that are not kills (PlayerbotAIQuestObjects.cpp) ---
     struct QuestInteractTarget
     {
@@ -596,6 +606,8 @@ private:
     float _travelLastY = 0.0f;
     uint32 _travelStillMs = 0;
     uint32 _deadMs = 0;
+    bool _pvpReleased = false;
+    uint32 _pvpAdvanceMs = 0;
 };
 
 #endif // _SF_PLAYERBOT_AI_H

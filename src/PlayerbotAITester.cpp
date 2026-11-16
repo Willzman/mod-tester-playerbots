@@ -889,6 +889,8 @@ bool PlayerbotAI::StartQuestTest(uint32 questId, uint64 requesterGuid, bool prep
         return fail("the bot is in a group");
     if (_bot->GetMap()->Instanceable() || _bot->IsInCombat() || _bot->IsBeingTeleported() || !_bot->IsAlive())
         return fail("the bot is busy (instance, combat, teleport or dead)");
+    if (_bot->InBattleground() || _bot->InBattlegroundQueue())
+        return fail("the bot is queued for a battleground or arena");
     if (!sBotSpawnIndex->IsLoaded())
         return fail("the spawn index is not loaded yet");
 

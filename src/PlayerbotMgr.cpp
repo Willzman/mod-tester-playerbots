@@ -4,6 +4,7 @@
 */
 
 #include "PlayerbotMgr.h"
+#include "BotBattlegrounds.h"
 #include "BotFindings.h"
 #include "BotTestMgr.h"
 #include "PlayerbotAI.h"
@@ -130,6 +131,9 @@ void PlayerbotMgr::LoadConfig()
     _joinLfg = sConfigMgr->GetBoolDefault("Playerbots.RandomBotJoinLfg", false);
     _joinLfgMaxBots = uint32(sConfigMgr->GetIntDefault("Playerbots.RandomBotJoinLfg.MaxBots", 10));
     _joinLfgLevelRange = uint32(sConfigMgr->GetIntDefault("Playerbots.RandomBotJoinLfg.LevelRange", 5));
+    _joinBg = sConfigMgr->GetBoolDefault("Playerbots.RandomBotJoinBG", false);
+    _joinBgMaxPerTeam = uint32(std::max(1, sConfigMgr->GetIntDefault("Playerbots.RandomBotJoinBG.MaxPerTeam", 15)));
+    _joinArena = sConfigMgr->GetBoolDefault("Playerbots.RandomBotJoinArena", false);
     if (_joinLfgMaxBots > 40)
         _joinLfgMaxBots = 40;
     if (_joinLfgLevelRange > 20)
@@ -328,6 +332,9 @@ void PlayerbotMgr::Update(uint32 diff)
 
     // AC-style: when a real player solo-queues LFG, fill with level-matched bots.
     UpdateLfgAutoJoin(diff);
+
+    // Battleground and arena invitations, and the fill next to a queued real player.
+    BotBattlegrounds::Update(diff);
 
     // Runs after map updates, so the flags apply on the next tick. Also runs
     // when the random pool is off — manually added bots need the same gate.
