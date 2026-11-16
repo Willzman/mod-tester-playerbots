@@ -23,6 +23,59 @@ Whisper replies with a short ack. Party/raid orders apply silently (no spam).
 | `.playerbots wipe confirm` | Delete all accounts matching `AccountPrefix` (and their characters). Requires the word `confirm`. |
 | `.playerbots init [<name>\|all\|self] [tank\|healer\|dps\|<spec>] [rare\|epic\|…] [relevel] [tele]` | Re-apply specialization, talents, and gear. `all` (and grouped bots on bare init) run in a background queue (`Playerbots.Init.PerTick`). Level stays unless `relevel` is passed. `tele` / `teleport` scatters to a level/faction-safe anchor after init (uses post-`relevel` level). |
 | `.playerbots self [on\|off]` | Attach/detach cast-only AI on **your** character. |
+| `.playerbots findings [<type>] [<page>]` | List what the bots found wrong with the server, most hits first. See [Play-tester](#play-tester). |
+| `.playerbots findings types` | The finding type names usable as a filter. |
+| `.playerbots findings go <id>` | Teleport yourself to where the finding was first met. |
+| `.playerbots findings clear <id\|all>` | Delete one finding, or all of them (e.g. after a fix; it comes back if a bot meets it again). |
+| `.playerbots test quest <id> [<bot>]` | Have a bot play one quest from its starter to the turn-in and report PASS / FAIL / SKIPPED. |
+| `.playerbots test zone [<zone id>]` | Queue every solo quest of a zone (your own zone when left out). |
+| `.playerbots test status` | Queued and running tests, and the pass / fail / skipped counts since startup. |
+| `.playerbots test results [fail]` | The last 20 results, or the last 20 failures. |
+| `.playerbots test stop` | Drop the queue and abort the running tests. |
+
+### Play-tester
+
+**Findings.** While random bots quest on their own they record the server
+problems they run into. Each problem is one row in the characters table
+`playerbots_findings`; meeting it again raises its hit count, so the list sorted
+by hits is the list of what bots trip over most. `Playerbots.Tester.ActiveBots`
+bots keep playing with no real player near them, so findings build up on an
+empty realm too.
+
+| Type | Meaning |
+| --- | --- |
+| `quest-no-starter` / `quest-no-ender` | No creature or object starts / ends the quest. |
+| `starter-no-spawn` / `ender-no-spawn` | The quest giver exists but is not spawned anywhere a bot can go. |
+| `starter-missing` / `ender-missing` | The quest giver is spawned in the database but was not at its spawn point. |
+| `accept-failed` / `turnin-failed` | Every check passed but the quest log did not change, or the giver refused. |
+| `objective-no-spawn` | A kill objective whose creature (and every creature that credits it) is not in the `creature` table. Creatures summoned by a script show up here too. |
+| `kill-no-credit` | The bot killed the objective creature, had the tap, and the counter did not move. |
+| `quest-stalled` | No objective progress for `Playerbots.Tester.QuestStallMinutes` while the bot was at the objective. |
+| `questgiver-no-quests` | A creature with the questgiver flag that starts and ends no quest. |
+| `path-failed` / `stuck` | No path to a destination / the bot stopped making headway on the way. One row per 50-yard cell. |
+| `bad-position` | The bot stood where its map has no ground, or a spawn point it could not be teleported to. |
+| `spell-never-casts` | The rotation picked a known, ready spell 8 times in a row and the cast never started. |
+
+A finding is a lead, not a verdict: bots only kill and loot, so a quest that
+needs an object used or an area explored is dropped without a finding, and a
+single hit is worth less than a dozen from different bots.
+
+**Directed tests.** `.playerbots test quest <id>` hands the quest to an idle
+random bot (or the named bot). The bot is teleported to the starter, accepts,
+kills and loots for the objectives, travels to the ender and turns in. The
+result names the step that failed, for example
+`FAIL - objectives: no progress in 300s on - kill 299 'Young Wolf' 3/8 (4 kill(s) gave no credit)`.
+
+* A random bot that already did the quest has it reset; one of the wrong level
+  is set to the quest's level and re-geared. Characters that are not random bots
+  are never changed.
+* `SKIPPED` means the quest could not be exercised: no bot may take it (wrong
+  faction, an earlier quest of the chain not done), or an objective needs
+  something a bot cannot do.
+* Zone runs go lowest quest first, so a chain is walked in order by the bot that
+  did the previous step. Group, dungeon, raid and PvP quests are left out.
+* Failures are also stored as findings. Results themselves are kept in memory
+  until the server restarts.
 
 ### Resetting the bot pool (e.g. all level 80 epic)
 

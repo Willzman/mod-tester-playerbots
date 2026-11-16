@@ -32,6 +32,23 @@ This module is being ported in phases. What is present today:
 * Per-spec rotation framework under `src/rotations/` (Hekili `.simc` as offline
   reference).
 
+### Play-testers
+
+The bots double as play-testers for the server:
+
+* **Findings**: while random bots quest on their own, they record what goes
+  wrong (quests that cannot be accepted, finished or turned in, objectives that
+  are not spawned, kills without credit, places they cannot path through, spells
+  that never cast) in the characters table `playerbots_findings`. List them in
+  game with `.playerbots findings`, jump to one with `.playerbots findings go <id>`.
+* **Directed tests**: `.playerbots test quest <id>` has a bot play one quest from
+  its starter to the turn-in and report PASS / FAIL with the step that failed;
+  `.playerbots test zone` queues every solo quest of a zone.
+* `Playerbots.Tester.ActiveBots` bots keep playing when no real player is around.
+
+Details, the finding types and the limits are in [COMMANDS.md](COMMANDS.md#play-tester);
+settings are the `Playerbots.Tester.*` keys.
+
 ### Self-bot mode
 
 `.playerbots self` attaches AI to **your** character without replacing the
@@ -132,10 +149,11 @@ files to the matching database:
 | Path | Database |
 |------|----------|
 | [`sql/characters/playerbots_preferred_mounts.sql`](sql/characters/playerbots_preferred_mounts.sql) | **characters** |
+| [`sql/characters/playerbots_findings.sql`](sql/characters/playerbots_findings.sql) | **characters** |
 
-Preferred mounts: the table is also created at runtime with
-`CREATE TABLE IF NOT EXISTS` on module load, so a fresh characters DB will not
-error. Keep the SQL file for tooling, backups, and manual apply.
+Both tables are also created at runtime with `CREATE TABLE IF NOT EXISTS` on
+module load, so a fresh characters DB will not error. Keep the SQL files for
+tooling, backups, and manual apply.
 
 ## Why this is a port, not a drop-in
 

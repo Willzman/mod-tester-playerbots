@@ -6,6 +6,7 @@
 #include "PlayerbotAI.h"
 #include "PlayerbotMgr.h"
 #include "BotEnchants.h"
+#include "BotFindings.h"
 #include "BotGearSets.h"
 #include "BotPreferredMounts.h"
 #include "BotTeleportMaps.h"
@@ -660,7 +661,10 @@ bool PlayerbotAI::RunTravel()
     }
 
     if (++_travelFailCount >= 5)
+    {
+        sBotFindings->RecordAt(BotFindingType::PathFailed, _bot, _travel.x, _travel.y, _travel.z);
         ClearTravelDestination();
+    }
     return true;
 }
 
@@ -1383,9 +1387,11 @@ void PlayerbotAI::UpdateAI(uint32 diff)
     if (!_bot->IsAlive())
     {
         ReleaseSelfMovement();
-        TryAcceptResurrect();
+        if (!TryAcceptResurrect())
+            HandleSoloDeath(diff);
         return;
     }
+    _deadMs = 0;
 
     _updateTimer += diff;
     if (_updateTimer < BOT_AI_UPDATE_INTERVAL)
@@ -1406,10 +1412,17 @@ void PlayerbotAI::UpdateAI(uint32 diff)
     if (_strandedCheckTimer >= BOT_STRANDED_CHECK_INTERVAL)
     {
         _strandedCheckTimer = 0;
-        if (!_clientControlled && !BotTeleportMaps::IsOnKnownGround(_bot)
-            && BotTeleportMaps::RescueStrandedBot(_bot))
-            return;
+        if (!_clientControlled && !BotTeleportMaps::IsOnKnownGround(_bot))
+        {
+            sBotFindings->RecordAt(BotFindingType::BadPosition, _bot, _bot->GetPositionX(),
+                _bot->GetPositionY(), _bot->GetPositionZ());
+            if (BotTeleportMaps::RescueStrandedBot(_bot))
+                return;
+        }
     }
+
+    // Play-tester: passive findings, then a directed quest test if one is running.
+    UpdateTester(BOT_AI_UPDATE_INTERVAL);
 
     // Ungrouped bots need the same phase sync grouped ones get, plus an explicit
     // viewer create-packet refresh after UpdateAreaPhase desyncs them.
@@ -1444,6 +1457,9 @@ void PlayerbotAI::UpdateAI(uint32 diff)
     if (!_bot->IsInCombat() && _bot->getAttackers().empty()
         && !IsBusyCasting(_bot)
         && BotRotation::TryMaintainBuffs(_bot))
+        return;
+
+    if (UpdateQuestTest(BOT_AI_UPDATE_INTERVAL))
         return;
 
     // Nearby / open-world questing (one step per tick). Skip while drinking —
@@ -2321,30 +2337,9 @@ Unit* PlayerbotAI::SelectQuestObjectiveTarget()
     if (!_bot)
         return nullptr;
 
+    // Kill objectives, their kill-credit creatures and the droppers of quest items.
     std::unordered_set<uint32> needEntries;
-    for (auto const& qs : _bot->getQuestStatusMap())
-    {
-        if (qs.second.Status != QUEST_STATUS_INCOMPLETE)
-            continue;
-        Quest const* quest = sObjectMgr->GetQuestTemplate(qs.first);
-        if (!quest)
-            continue;
-
-        uint16 const slot = _bot->FindQuestSlot(qs.first);
-        if (slot >= MAX_QUEST_LOG_SIZE)
-            continue;
-
-        for (QuestObjective const* obj : quest->m_questObjectives)
-        {
-            if (!obj || obj->Type != QUEST_OBJECTIVE_TYPE_NPC)
-                continue;
-            uint16 const have = _bot->GetQuestSlotCounter(slot, obj->Index);
-            uint16 const needAmt = uint16(obj->Amount > 0 ? obj->Amount : 1);
-            if (have >= needAmt)
-                continue;
-            needEntries.insert(obj->ObjectId);
-        }
-    }
+    CollectQuestKillEntries(needEntries);
     if (needEntries.empty())
         return nullptr;
 
@@ -2890,7 +2885,11 @@ void PlayerbotAI::DoRotation(Unit* target)
     if (selected)
     {
         if (BotRotation::CastSpell(_bot, target, selected))
+        {
+            NoteSpellResult(selected, true);
             return;
+        }
+        NoteSpellResult(selected, false);
         BackOffSpell(selected);
     }
 
@@ -5698,7 +5697,7 @@ bool PlayerbotAI::QuestgiverHasUsefulWork(Creature const* npc) const
         Quest const* quest = sObjectMgr->GetQuestTemplate(itr->second);
         if (!quest)
             continue;
-        if (_bot->GetQuestStatus(itr->second) != QUEST_STATUS_NONE)
+        if (_bot->GetQuestStatus(itr->second) != QUEST_STATUS_NONE || IsQuestAbandoned(itr->second))
             continue;
         if (_bot->CanTakeQuest(quest, false) && _bot->CanAddQuest(quest, false))
             return true;
@@ -6376,20 +6375,13 @@ bool PlayerbotAI::HandleQuestNpcs()
             QuestStatus const status = _bot->GetQuestStatus(mi.QuestId);
             if (status == QUEST_STATUS_COMPLETE && _bot->CanRewardQuest(quest, false))
             {
-                uint32 const reward = BestRewardItem(quest);
-                if (_bot->CanRewardQuest(quest, reward, false))
-                {
-                    _bot->RewardQuest(quest, reward, npc, true);
+                if (TurnInQuest(quest, npc))
                     return true;
-                }
             }
-            if (status == QUEST_STATUS_NONE)
+            if (status == QUEST_STATUS_NONE && !IsQuestAbandoned(mi.QuestId))
             {
-                if (_bot->CanTakeQuest(quest, false) && _bot->CanAddQuest(quest, false))
-                {
-                    _bot->AddQuest(quest, npc);
+                if (AcceptQuest(quest, npc))
                     return true;
-                }
             }
             // Menu shows something for this bot even if we couldn't act yet
             // (e.g. full log) — don't blacklist permanently this tick.
@@ -6399,7 +6391,15 @@ bool PlayerbotAI::HandleQuestNpcs()
         // Empty or unusable questgiver (bugged flag / conditions). Skip for a while
         // so we leave and grind / find another NPC instead of pathing in place.
         if (!useful)
+        {
+            // The questgiver flag with no quest behind it is a data problem.
+            QuestRelationBounds const starts = sObjectMgr->GetCreatureQuestRelationBounds(npc->GetEntry());
+            QuestRelationBounds const ends = sObjectMgr->GetCreatureQuestInvolvedRelationBounds(npc->GetEntry());
+            if (starts.first == starts.second && ends.first == ends.second
+                && npc->HasFlag(UNIT_FIELD_NPC_FLAGS, UNIT_NPC_FLAG_QUESTGIVER))
+                sBotFindings->Record(BotFindingType::QuestgiverNoQuests, npc->GetEntry(), 0, _bot);
             IgnoreQuestNpc(npc->GetEntry());
+        }
     }
     return false;
 }
@@ -6534,76 +6534,32 @@ bool PlayerbotAI::TravelToNearbyQuestgiver()
 
 bool PlayerbotAI::TravelToQuestObjective()
 {
-    if (!_bot || HasTravelDestination())
+    if (!_bot || HasTravelDestination() || _pendingTeleport.active)
         return false;
 
     // Objective already in combat/hunt range — let SelectTarget pull it.
     if (SelectQuestObjectiveTarget())
         return false;
 
-    for (auto const& qs : _bot->getQuestStatusMap())
+    for (uint8 slot = 0; slot < MAX_QUEST_LOG_SIZE; ++slot)
     {
-        if (qs.second.Status != QUEST_STATUS_INCOMPLETE)
+        uint32 const questId = _bot->GetQuestSlotQuestId(slot);
+        if (!questId || _bot->GetQuestStatus(questId) != QUEST_STATUS_INCOMPLETE)
             continue;
-        Quest const* quest = sObjectMgr->GetQuestTemplate(qs.first);
+        Quest const* quest = sObjectMgr->GetQuestTemplate(questId);
         if (!quest)
             continue;
 
-        uint16 const slot = _bot->FindQuestSlot(qs.first);
-        if (slot >= MAX_QUEST_LOG_SIZE)
+        BotSpawn spawn;
+        if (!FindObjectiveSpawn(quest, spawn))
             continue;
 
-        for (QuestObjective const* obj : quest->m_questObjectives)
-        {
-            if (!obj)
-                continue;
-            if (obj->Type != QUEST_OBJECTIVE_TYPE_NPC && obj->Type != QUEST_OBJECTIVE_TYPE_NPC_INTERACT
-                && obj->Type != QUEST_OBJECTIVE_TYPE_GO)
-                continue;
-            uint16 const have = _bot->GetQuestSlotCounter(slot, obj->Index);
-            if (have >= uint16(obj->Amount > 0 ? obj->Amount : 1))
-                continue;
-
-            // Nearest same-map spawn for this objective entry.
-            QueryResult result = WorldDatabase.PQuery(
-                "SELECT position_x, position_y, position_z FROM creature WHERE id = %u AND map = %u LIMIT 8",
-                obj->ObjectId, _bot->GetMapId());
-            if (!result && obj->Type == QUEST_OBJECTIVE_TYPE_GO)
-                result = WorldDatabase.PQuery(
-                    "SELECT position_x, position_y, position_z FROM gameobject WHERE id = %u AND map = %u LIMIT 8",
-                    obj->ObjectId, _bot->GetMapId());
-            if (!result)
-                continue;
-
-            float bestX = 0, bestY = 0, bestZ = 0;
-            float bestD2 = -1.0f;
-            do
-            {
-                Field* f = result->Fetch();
-                float const x = f[0].GetFloat();
-                float const y = f[1].GetFloat();
-                float const z = f[2].GetFloat();
-                float const dx = x - _bot->GetPositionX();
-                float const dy = y - _bot->GetPositionY();
-                float const dz = z - _bot->GetPositionZ();
-                float const d2 = dx * dx + dy * dy + dz * dz;
-                if (bestD2 < 0.0f || d2 < bestD2)
-                {
-                    bestD2 = d2;
-                    bestX = x;
-                    bestY = y;
-                    bestZ = z;
-                }
-            } while (result->NextRow());
-
-            if (bestD2 >= 0.0f)
-            {
-                // Already in the hunt area — let combat/wander search locally.
-                if (bestD2 <= BOT_QUEST_HUNT_RADIUS * BOT_QUEST_HUNT_RADIUS)
-                    return false;
-                return SetTravelDestination(_bot->GetMapId(), bestX, bestY, bestZ);
-            }
-        }
+        // Already in the hunt area — let combat/wander search locally.
+        if (spawn.mapId == _bot->GetMapId()
+            && _bot->GetExactDist(spawn.x, spawn.y, spawn.z) <= BOT_QUEST_HUNT_RADIUS)
+            return false;
+        if (TravelToSpawn(spawn))
+            return true;
     }
     return false;
 }
@@ -6621,6 +6577,9 @@ bool PlayerbotAI::HandleAutoQuesting()
         return false;
     }
     if (HasEngageTarget())
+        return false;
+    // A directed test drives its own quest giver and objective travel.
+    if (IsQuestTesting() || _pendingTeleport.active)
         return false;
 
     // Do not path to quests/vendors while drinking — MovePoint stands us up.
@@ -6647,6 +6606,8 @@ bool PlayerbotAI::HandleAutoQuesting()
 
     if (_quests || _forceQuest)
     {
+        if (TravelToQuestEnder())
+            return true;
         if (TravelToQuestObjective())
             return true;
         if (TravelToNearbyQuestgiver())

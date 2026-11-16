@@ -281,6 +281,27 @@ for future updates.
   that beat the worn piece by the Need rule, after loot, won rolls and quest rewards and every
   `Playerbots.AutoEquip.Interval` s out of combat; never from the PvP gear bag, not in
   battlegrounds/arenas. Alts only on `equip upgrades` unless `Playerbots.AutoEquip.Alts = 1`.
+* [DONE] **Play-tester findings** (`BotFindings`, `PlayerbotAITester.cpp`): questing
+  bots record quests that cannot be accepted / advanced / turned in, objectives
+  with no spawn, kills without credit, failed paths, stuck and off-map positions
+  and spells that never cast, deduplicated in `playerbots_findings` (characters
+  DB). `.playerbots findings [type] [page] | go <id> | clear <id|all>`.
+* [DONE] **Directed quest tests** (`BotTestMgr`): `.playerbots test quest <id>` /
+  `test zone` hand quests to idle random bots, which play them from starter to
+  turn-in and report pass / fail / skipped with the failing step.
+* [DONE] **Quest travel off the local map** (`BotSpawnIndex`): objective, starter
+  and ender spawns come from an in-memory index (no queries on map threads);
+  bots travel to the ender of a finished quest, and teleport when the spot is on
+  another map or beyond `Playerbots.Quest.TeleportDistance`. Kill objectives
+  count creatures that credit them through `KillCredit`; item objectives send
+  bots after the creatures that drop the item. Quests handed in from the log
+  are rewarded without an ender.
+* [DONE] Solo bots get up 30 s after dying in the open world; before, a bot that
+  died alone stayed dead. `Playerbots.Tester.ActiveBots` random bots are exempt
+  from the activity throttle so they play with no real player around.
+* [TODO] Tester: objectives that need an object used, an NPC talked to, an item
+  used or an area explored (bots only kill and loot); item objectives that drop
+  from gameobjects or reference loot; dungeon runs without a human leader.
 * [TODO] LFR: bots fill raid finder queues (auto-accept the LFR prompt/roles).
 * [TODO] Random battlegrounds / rated battlegrounds and arenas.
 * [TODO] Open-world grinding population polish (TravelNode / full quest graph still

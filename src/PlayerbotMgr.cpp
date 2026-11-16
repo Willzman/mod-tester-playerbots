@@ -4,6 +4,8 @@
 */
 
 #include "PlayerbotMgr.h"
+#include "BotFindings.h"
+#include "BotTestMgr.h"
 #include "PlayerbotAI.h"
 #include "engine/BotMovement.h"
 #include "rotations/BotRotation.h"
@@ -197,6 +199,18 @@ void PlayerbotMgr::LoadConfig()
     _vendorSellGreens = sConfigMgr->GetBoolDefault("Playerbots.Vendor.SellGreens", true);
     _vendorHubMaxDistance = float(sConfigMgr->GetFloatDefault("Playerbots.Vendor.HubMaxDistance", 500.0f));
     _questAutoPickReward = sConfigMgr->GetBoolDefault("Playerbots.Quest.AutoPickReward", true);
+    _questTeleportDistance = sConfigMgr->GetFloatDefault("Playerbots.Quest.TeleportDistance", 300.0f);
+    if (_questTeleportDistance < 0.0f)
+        _questTeleportDistance = 0.0f;
+
+    sBotFindings->SetEnabled(sConfigMgr->GetBoolDefault("Playerbots.Tester.Enable", true));
+    _testerQuestStallMs = uint32(std::max(0, sConfigMgr->GetIntDefault("Playerbots.Tester.QuestStallMinutes", 20)))
+        * MINUTE * IN_MILLISECONDS;
+    _testerAbandonStalled = sConfigMgr->GetBoolDefault("Playerbots.Tester.AbandonStalledQuests", true);
+    _testerActiveBots = uint32(std::max(0, sConfigMgr->GetIntDefault("Playerbots.Tester.ActiveBots", 10)));
+    _testObjectiveTimeoutMs = uint32(std::max(30, sConfigMgr->GetIntDefault("Playerbots.Tester.ObjectiveTimeout", 300)))
+        * IN_MILLISECONDS;
+    _testMaxConcurrent = uint32(std::max(1, sConfigMgr->GetIntDefault("Playerbots.Tester.MaxConcurrentTests", 5)));
 
     _activityEnabled = sConfigMgr->GetBoolDefault("Playerbots.Activity.Enable", true);
     _activityActiveRange = sConfigMgr->GetFloatDefault("Playerbots.Activity.ActiveRange", 0.0f);
@@ -304,13 +318,20 @@ void PlayerbotMgr::Update(uint32 diff)
             if (session->IsBot() && session->GetBotActivity() != WorldSession::BotActivity::Full)
                 ai->AcceptPendingInvite();
         ai->HandleLfg();
+        // Map changes asked for by quest travel or a directed test.
+        ai->ProcessPendingTeleport();
     }
+
+    // Play-tester: hand out queued quest tests, publish results, save findings.
+    sBotTestMgr->Update(diff);
+    sBotFindings->Update(diff);
 
     // AC-style: when a real player solo-queues LFG, fill with level-matched bots.
     UpdateLfgAutoJoin(diff);
 
     // Runs after map updates, so the flags apply on the next tick. Also runs
     // when the random pool is off — manually added bots need the same gate.
+    UpdateTesterActiveBots();
     UpdateBotActivity();
 
     if (!_randomBotsEnabled)
@@ -378,6 +399,47 @@ void PlayerbotMgr::GetBotActivityCounts(uint32& full, uint32& slow, uint32& dorm
     }
 }
 
+void PlayerbotMgr::UpdateTesterActiveBots()
+{
+    // Bots running a directed test, plus a fixed crew of ungrouped random bots.
+    for (auto itr = _testerActive.begin(); itr != _testerActive.end();)
+    {
+        PlayerbotAI* ai = GetBotAI(*itr);
+        Player* bot = ai ? ai->GetBot() : nullptr;
+        bool const keep = bot && bot->IsInWorld() && (ai->IsQuestTesting()
+            || (sBotFindings->IsEnabled() && IsRandomBot(*itr) && !bot->GetGroup()));
+        if (keep)
+            ++itr;
+        else
+            itr = _testerActive.erase(itr);
+    }
+
+    uint32 crew = 0;
+    for (uint64 guid : _testerActive)
+    {
+        PlayerbotAI* ai = GetBotAI(guid);
+        if (ai && !ai->IsQuestTesting())
+            ++crew;
+    }
+
+    for (auto const& pair : _ai)
+    {
+        PlayerbotAI* ai = pair.second;
+        Player* bot = ai ? ai->GetBot() : nullptr;
+        if (!bot || !bot->IsInWorld() || ai->IsClientControlled() || _testerActive.count(pair.first))
+            continue;
+
+        if (ai->IsQuestTesting())
+            _testerActive.insert(pair.first);
+        else if (sBotFindings->IsEnabled() && crew < _testerActiveBots && IsRandomBot(pair.first)
+            && !bot->GetGroup() && !bot->GetMap()->Instanceable())
+        {
+            _testerActive.insert(pair.first);
+            ++crew;
+        }
+    }
+}
+
 void PlayerbotMgr::UpdateBotActivity()
 {
     if (!_activityEnabled)
@@ -433,6 +495,8 @@ void PlayerbotMgr::UpdateBotActivity()
             if (!porting && !initializing.count(bot->GetGUID()))
             {
                 if (BotGroupedWithRealPlayer(bot))
+                    next = WorldSession::BotActivity::Full;
+                else if (IsTesterActiveBot(bot->GetGUID()))
                     next = WorldSession::BotActivity::Full;
                 else
                 {
@@ -1715,6 +1779,18 @@ void PlayerbotMgr::DestroyBotAI(uint64 characterGuid)
     auto it = _ai.find(characterGuid);
     if (it == _ai.end())
         return;
+
+    // A bot that leaves in the middle of a directed test still owes a result.
+    if (it->second->IsQuestTesting())
+    {
+        BotTestResult result;
+        result.questId = it->second->GetTestQuestId();
+        result.message = std::string(it->second->GetTestStepName()) + ": the bot logged out";
+        if (Player* bot = it->second->GetBot())
+            result.bot = bot->GetName();
+        sBotTestMgr->Report(result);
+    }
+    _testerActive.erase(characterGuid);
 
     delete it->second;
     _ai.erase(it);

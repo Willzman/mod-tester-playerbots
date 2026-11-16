@@ -511,6 +511,20 @@ namespace BotTeleportMaps
         return true;
     }
 
+    bool TeleportToSpawn(Player* bot, uint32 mapId, float x, float y, float z)
+    {
+        if (!bot || !bot->IsInWorld() || !bot->IsAlive())
+            return false;
+
+        MapEntry const* map = sMapStore.LookupEntry(mapId);
+        if (!map || map->Instanceable())
+            return false;
+        if (!MapManager::IsValidMapCoord(mapId, x, y, z) || !MapTileExists(mapId, x, y))
+            return false;
+
+        return CommitTeleport(bot, mapId, x, y, z, bot->GetOrientation());
+    }
+
     bool TeleportToHomebind(Player* bot)
     {
         if (!bot || !bot->IsInWorld() || !bot->IsAlive())

@@ -101,6 +101,18 @@ public:
     bool GetQuestAutoPickReward() const { return _questAutoPickReward; }
     bool IsRandomBot(uint64 characterGuid) const { return _randomBots.count(characterGuid) > 0; }
 
+    // Play-tester settings (Playerbots.Tester.* / Playerbots.Quest.TeleportDistance).
+    // Active questing time without objective progress before a quest counts as stalled; 0 = never.
+    uint32 GetQuestStallMs() const { return _testerQuestStallMs; }
+    bool ShouldAbandonStalledQuests() const { return _testerAbandonStalled; }
+    // Questing bots teleport to an objective or turn-in farther away than this
+    // (or on another map); 0 = walk only, same map only.
+    float GetQuestTeleportDistance() const { return _questTeleportDistance; }
+    uint32 GetTestObjectiveTimeoutMs() const { return _testObjectiveTimeoutMs; }
+    uint32 GetTestMaxConcurrent() const { return _testMaxConcurrent; }
+    // Random bots exempt from the activity throttle so they keep playing with no real player around.
+    bool IsTesterActiveBot(uint64 characterGuid) const { return _testerActive.count(characterGuid) > 0; }
+
     // Provisions bot accounts (prefix + n) and fills them with characters using
     // the configured faction/role ratios and level range. Incremental: existing
     // accounts/characters are reused. Returns the number of characters
@@ -246,6 +258,8 @@ private:
     void UpdateLfgAutoJoin(uint32 diff);
     // Full / slow / dormant from real-player positions. Applies next map tick.
     void UpdateBotActivity();
+    // Keeps Playerbots.Tester.ActiveBots ungrouped random bots in _testerActive.
+    void UpdateTesterActiveBots();
     // Stop movement and drop combat when a bot leaves full speed.
     void QuiesceBot(Player* bot);
     void ProcessInitQueue();
@@ -354,6 +368,14 @@ private:
     bool _vendorSellGreens = true;
     float _vendorHubMaxDistance = 500.0f;
     bool _questAutoPickReward = true;
+
+    uint32 _testerQuestStallMs = 20 * 60 * 1000;
+    bool _testerAbandonStalled = true;
+    float _questTeleportDistance = 300.0f;
+    uint32 _testObjectiveTimeoutMs = 5 * 60 * 1000;
+    uint32 _testMaxConcurrent = 5;
+    uint32 _testerActiveBots = 10;
+    std::unordered_set<uint64> _testerActive;
 
     // Empty maps freeze bots; same map but far away idles on a slow heartbeat.
     bool _activityEnabled = true;

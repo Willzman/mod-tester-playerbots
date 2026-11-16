@@ -24,6 +24,7 @@
 
 #include "engine/BotStrategyEngine.h"
 #include "engine/BotTargetValues.h"
+#include "BotSpawnIndex.h"
 #include "Define.h"
 #include <memory>
 #include <string>
@@ -40,6 +41,7 @@ class Item;
 struct ItemTemplate;
 class Quest;
 struct MountCapabilityEntry;
+enum class BotTestOutcome : uint8;
 
 class PlayerbotAI
 {
@@ -187,6 +189,30 @@ public:
     uint32 EquipBagUpgrades(std::vector<std::string>* equipped = nullptr);
     // A new item reached the bags (loot, roll won, quest reward): check for upgrades soon.
     void QueueEquipUpgrades() { _equipUpgradesPending = true; }
+
+    // --- Play-tester (PlayerbotAITester.cpp) ---
+    // A kill that should have advanced a quest objective and did not is a finding.
+    void NoteCreatureKill(Creature* killed);
+    // Rotation cast outcome. A spell that is picked again and again and never starts is a finding.
+    void NoteSpellResult(uint32 spellId, bool started);
+    // Accept / turn in the way the client opcode handlers do. False when the quest
+    // log did not change as it should have.
+    bool AcceptQuest(Quest const* quest, Object* giver);
+    bool TurnInQuest(Quest const* quest, Object* giver);
+    // Given up on by this bot (stalled or failed a test): not picked up again this session.
+    bool IsQuestAbandoned(uint32 questId) const { return _abandonedQuests.count(questId) != 0; }
+
+    // Directed test: play one quest from its starter to the turn-in and report the
+    // outcome to BotTestMgr. World thread. prepare lets a random bot be leveled
+    // for the quest. False with *error when this bot cannot run it.
+    bool StartQuestTest(uint32 questId, uint64 requesterGuid, bool prepare, std::string* error);
+    // Drops a running test without a result.
+    void CancelQuestTest();
+    // World thread: carries out a teleport TravelToSpawn asked for.
+    void ProcessPendingTeleport();
+    bool IsQuestTesting() const { return _test.questId != 0; }
+    uint32 GetTestQuestId() const { return _test.questId; }
+    char const* GetTestStepName() const;
 
 private:
     // Coarse combat role used by filters and strategy gating.
@@ -467,6 +493,75 @@ private:
     bool _lfgRoleResponded;
     bool _lfgProposalResponded;
     bool _wasGrouped;    // detect invite/leave for strategy packs
+    // --- Play-tester state ---
+    enum class TestStep : uint8 { None, Accept, Objectives, TurnIn };
+
+    struct QuestTest
+    {
+        uint32 questId = 0;
+        TestStep step = TestStep::None;
+        uint64 requester = 0;
+        uint32 startedMs = 0;
+        // Time spent in the current step, and since the objectives last advanced.
+        uint32 stepMs = 0;
+        uint32 idleMs = 0;
+        uint32 signature = 0;
+        uint32 killsWithoutCredit = 0;
+        uint32 deaths = 0;
+        // Quest giver the current step walks to.
+        uint32 giverEntry = 0;
+        bool giverIsObject = false;
+        BotSpawn giverSpawn;
+        bool hadQuests = false;
+        bool hadGrind = false;
+    };
+
+    struct QuestWatch
+    {
+        uint32 signature = 0;
+        uint32 idleMs = 0;
+    };
+
+    void UpdateTester(uint32 elapsed);
+    void UpdateQuestWatch(uint32 elapsed);
+    // Runs the directed test. True when it used this tick.
+    bool UpdateQuestTest(uint32 elapsed);
+    bool BeginTestStep(TestStep step, std::string& failure);
+    void FinishQuestTest(BotTestOutcome outcome, std::string const& message);
+    Object* FindTestGiver() const;
+    uint32 QuestProgressSignature(Quest const* quest) const;
+    // First unfinished objective, described for a result or finding. supported is
+    // false when a bot cannot work on it (use an object, cast a spell, explore).
+    std::string DescribeOpenObjective(Quest const* quest, bool& supported, uint32& objectId) const;
+    // Creature entries worth killing for the bot's open kill and item objectives.
+    void CollectQuestKillEntries(std::unordered_set<uint32>& out) const;
+    // Nearest place to work on an open objective of the quest.
+    bool FindObjectiveSpawn(Quest const* quest, BotSpawn& out) const;
+    bool FindQuestGiverSpawn(Quest const* quest, bool ender, uint32& entry, bool& isObject, BotSpawn& out,
+        bool& anyRelation) const;
+    // Walks to a spot on this map; teleports when it is on another map or far
+    // away and teleporting is allowed. False when the bot cannot get there.
+    bool TravelToSpawn(BotSpawn const& spawn);
+    bool TravelToQuestEnder();
+    void AbandonQuest(uint32 questId);
+    // Nobody resurrects a bot that dies alone: it gets up where it fell after
+    // a while, and a directed test gives up after a few deaths.
+    void HandleSoloDeath(uint32 diff);
+    void NoteTravelProgress(uint32 elapsed);
+
+    uint32 _testerTimer = 0;
+    QuestTest _test;
+    TravelDest _pendingTeleport;
+    std::unordered_map<uint32, QuestWatch> _questWatch;
+    std::unordered_set<uint32> _abandonedQuests;
+    // (quest id << 8 | objective index) -> counter when it was last looked at.
+    std::unordered_map<uint64, uint16> _objectiveCounters;
+    // spell id -> casts in a row that did not start; 0xFF once it has cast.
+    std::unordered_map<uint32, uint8> _spellFails;
+    float _travelLastX = 0.0f;
+    float _travelLastY = 0.0f;
+    uint32 _travelStillMs = 0;
+    uint32 _deadMs = 0;
 };
 
 #endif // _SF_PLAYERBOT_AI_H

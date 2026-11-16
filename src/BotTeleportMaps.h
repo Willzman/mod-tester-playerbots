@@ -45,6 +45,11 @@ namespace BotTeleportMaps
     // `.playerbots init … tele` sends levels 1–5 to homebind / race create.
     bool TeleportForLevel(Player* bot, bool fromPlayerCommand = false);
 
+    // Teleports to a creature or gameobject spawn point on an open-world map
+    // (quest travel, directed tests). No level or faction gate: the caller
+    // decides. Reverts when the bot does not arrive.
+    bool TeleportToSpawn(Player* bot, uint32 mapId, float x, float y, float z);
+
     // Hearth / homebind location (falls back to race create coords).
     // Refuses a homebind that is not on a real tile for its map.
     bool TeleportToHomebind(Player* bot);

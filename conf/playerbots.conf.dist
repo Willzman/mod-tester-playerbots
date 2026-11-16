@@ -538,6 +538,73 @@ Playerbots.Vendor.HubMaxDistance = 500
 Playerbots.Quest.AutoPickReward = 1
 
 #
+#    Playerbots.Quest.TeleportDistance
+#        Description: A questing bot teleports to an objective or turn-in that is
+#                     farther away than this many yards, or on another map (same
+#                     level and faction gates as the init scatter). Closer ones are
+#                     walked to. 0 = never teleport: walk only, same map only.
+#        Default:     300
+
+Playerbots.Quest.TeleportDistance = 300
+
+###################################################################################################
+# PLAY-TESTER
+#
+#    Bots record the server problems they meet while playing in the characters
+#    table `playerbots_findings` (list them with `.playerbots findings`), and run
+#    quests on demand with `.playerbots test quest <id>` / `.playerbots test zone`.
+#
+#    Playerbots.Tester.Enable
+#        Description: Record findings. 0 stops recording and keeps the stored rows.
+#        Default:     1
+
+Playerbots.Tester.Enable = 1
+
+#
+#    Playerbots.Tester.ActiveBots
+#        Description: This many ungrouped random bots are exempt from the activity
+#                     throttle (Playerbots.Activity.*), so they keep questing and
+#                     testing when no real player is near them. Each one keeps the
+#                     creatures around it updating like a real player does.
+#                     0 = bots only play near real players.
+#        Default:     10
+
+Playerbots.Tester.ActiveBots = 10
+
+#
+#    Playerbots.Tester.QuestStallMinutes
+#        Description: Minutes of solo questing without any objective progress
+#                     before a quest counts as stalled. A stall is recorded as a
+#                     finding when the bot was at the objective. 0 = never.
+#        Default:     20
+
+Playerbots.Tester.QuestStallMinutes = 20
+
+#
+#    Playerbots.Tester.AbandonStalledQuests
+#        Description: Drop a stalled quest (and one whose ender does not exist) so
+#                     the bot moves on. It is not picked up again until the bot
+#                     logs in again.
+#        Default:     1
+
+Playerbots.Tester.AbandonStalledQuests = 1
+
+#
+#    Playerbots.Tester.ObjectiveTimeout
+#        Description: Directed tests: seconds without objective progress before
+#                     the quest fails. Minimum 30.
+#        Default:     300
+
+Playerbots.Tester.ObjectiveTimeout = 300
+
+#
+#    Playerbots.Tester.MaxConcurrentTests
+#        Description: Directed tests running at the same time, one bot each.
+#        Default:     5
+
+Playerbots.Tester.MaxConcurrentTests = 5
+
+#
 #    Playerbots.Activity.Enable
 #        Description: When 1, socket bots skip map updates on maps with no real
 #                     player (dormant) and only heartbeat every SlowInterval

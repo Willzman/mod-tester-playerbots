@@ -6,7 +6,10 @@
 */
 
 #include "PlayerbotMgr.h"
+#include "BotFindings.h"
 #include "BotPreferredMounts.h"
+#include "BotSpawnIndex.h"
+#include "BotTestMgr.h"
 #include "BotVendorHubs.h"
 #include "Chat.h"
 #include "DBCStores.h"
@@ -67,6 +70,15 @@ public:
     void OnLogout(Player* player) override
     {
         sPlayerbotMgr->OnPlayerLogout(player);
+    }
+
+    // Play-tester: a kill that should have counted for a quest and did not.
+    void OnCreatureKill(Player* killer, Creature* killed) override
+    {
+        if (!sPlayerbotMgr->IsEnabled() || !killer || !killed)
+            return;
+        if (PlayerbotAI* ai = sPlayerbotMgr->GetBotAI(killer))
+            ai->NoteCreatureKill(killed);
     }
 
     // Whisper directed at a bot or self-bot (including whispering yourself).
@@ -220,6 +232,8 @@ public:
 
         sBotVendorHubs->Load();
         sBotPreferredMounts->Load();
+        sBotSpawnIndex->Load();
+        sBotFindings->Load();
     }
 
     void OnUpdate(uint32 diff) override
@@ -230,6 +244,7 @@ public:
     void OnShutdown() override
     {
         sPlayerbotMgr->LogoutAllBots();
+        sBotFindings->Flush();
     }
 };
 
@@ -253,6 +268,8 @@ public:
             { "wipe",   rbac::RBAC_PERM_COMMAND_GM, true, &HandlePlayerbotWipeCommand,   "", },
             { "init",   rbac::RBAC_PERM_COMMAND_GM, true, &HandlePlayerbotInitCommand,   "", },
             { "self",   rbac::RBAC_PERM_COMMAND_GM, false, &HandlePlayerbotSelfCommand,  "", },
+            { "findings", rbac::RBAC_PERM_COMMAND_GM, true, &HandlePlayerbotFindingsCommand, "", },
+            { "test",   rbac::RBAC_PERM_COMMAND_GM, true, &HandlePlayerbotTestCommand,   "", },
         };
 
         static std::vector<ChatCommand> commandTable =
@@ -904,6 +921,221 @@ public:
         else
             handler->PSendSysMessage("Initialized yourself%s.", choiceNote.c_str());
         return true;
+    }
+
+    // .playerbots findings [type] [page] | types | go <id> | clear <id|all>
+    static bool HandlePlayerbotFindingsCommand(ChatHandler* handler, char const* args)
+    {
+        std::istringstream in(args ? args : "");
+        std::string first;
+        std::string second;
+        in >> first >> second;
+
+        if (first == "types")
+        {
+            handler->SendSysMessage("Finding types:");
+            for (uint8 type = 1; type < uint8(BotFindingType::Max); ++type)
+                handler->PSendSysMessage("  %s", BotFindings::TypeName(BotFindingType(type)));
+            return true;
+        }
+
+        if (first == "go")
+        {
+            Player* player = handler->GetSession() ? handler->GetSession()->GetPlayer() : nullptr;
+            BotFinding finding;
+            if (!player || second.empty() || !sBotFindings->Get(uint32(atoi(second.c_str())), finding))
+            {
+                handler->SendSysMessage("Usage (in game): .playerbots findings go <id>");
+                handler->SetSentErrorMessage(true);
+                return false;
+            }
+            if (player->IsInFlight())
+            {
+                player->GetMotionMaster()->MovementExpired();
+                player->CleanupAfterTaxiFlight();
+            }
+            else
+                player->SaveRecallPosition();
+            player->TeleportTo(finding.mapId, finding.x, finding.y, finding.z, player->GetOrientation());
+            handler->SendSysMessage(BotFindings::Describe(finding).c_str());
+            return true;
+        }
+
+        if (first == "clear")
+        {
+            if (second.empty())
+            {
+                handler->SendSysMessage("Usage: .playerbots findings clear <id|all>");
+                handler->SetSentErrorMessage(true);
+                return false;
+            }
+            uint32 const removed = sBotFindings->Remove(second == "all" ? 0 : uint32(atoi(second.c_str())));
+            if (second != "all" && !removed)
+            {
+                handler->PSendSysMessage("There is no finding %s.", second.c_str());
+                handler->SetSentErrorMessage(true);
+                return false;
+            }
+            handler->PSendSysMessage("Removed %u finding(s).", removed);
+            return true;
+        }
+
+        // List: optional type name, optional page number, in either order.
+        BotFindingType type = BotFindingType::None;
+        uint32 page = 1;
+        for (std::string const& token : { first, second })
+        {
+            if (token.empty())
+                continue;
+            if (isdigit(static_cast<unsigned char>(token[0])))
+                page = std::max(1, atoi(token.c_str()));
+            else
+            {
+                type = BotFindings::TypeFromName(token);
+                if (type == BotFindingType::None)
+                {
+                    handler->PSendSysMessage("Unknown finding type '%s' (see .playerbots findings types).", token.c_str());
+                    handler->SetSentErrorMessage(true);
+                    return false;
+                }
+            }
+        }
+
+        std::vector<BotFinding> findings;
+        sBotFindings->GetList(findings, type);
+        if (!sBotFindings->IsEnabled())
+            handler->SendSysMessage("Findings are not being recorded (Playerbots.Tester.Enable = 0).");
+        if (findings.empty())
+        {
+            handler->SendSysMessage("No findings.");
+            return true;
+        }
+
+        uint32 const perPage = 15;
+        uint32 const pages = (uint32(findings.size()) + perPage - 1) / perPage;
+        page = std::min(page, pages);
+        handler->PSendSysMessage("Findings: %u, most hits first (page %u/%u).", uint32(findings.size()), page, pages);
+        for (uint32 i = (page - 1) * perPage; i < findings.size() && i < page * perPage; ++i)
+            handler->SendSysMessage(BotFindings::Describe(findings[i]).c_str());
+        return true;
+    }
+
+    // .playerbots test quest <id> [bot] | zone [id] | status | results [fail] | stop
+    static bool HandlePlayerbotTestCommand(ChatHandler* handler, char const* args)
+    {
+        if (!sPlayerbotMgr->IsEnabled())
+        {
+            handler->SendSysMessage("Playerbots module is disabled (set Playerbots.Enable = 1).");
+            handler->SetSentErrorMessage(true);
+            return false;
+        }
+
+        std::istringstream in(args ? args : "");
+        std::string action;
+        std::string first;
+        std::string second;
+        in >> action >> first >> second;
+
+        Player* issuer = handler->GetSession() ? handler->GetSession()->GetPlayer() : nullptr;
+        uint64 const issuerGuid = issuer ? issuer->GetGUID() : 0;
+
+        if (action == "quest")
+        {
+            uint32 const questId = uint32(atoi(first.c_str()));
+            Quest const* quest = questId ? sObjectMgr->GetQuestTemplate(questId) : nullptr;
+            if (!quest)
+            {
+                handler->SendSysMessage("Usage: .playerbots test quest <quest id> [bot name]");
+                handler->SetSentErrorMessage(true);
+                return false;
+            }
+
+            uint64 botGuid = 0;
+            if (!second.empty())
+            {
+                std::string name = second;
+                if (normalizePlayerName(name))
+                    botGuid = sObjectMgr->GetPlayerGUIDByName(name);
+                if (!botGuid || !sPlayerbotMgr->IsBot(botGuid))
+                {
+                    handler->PSendSysMessage("'%s' is not an active bot.", second.c_str());
+                    handler->SetSentErrorMessage(true);
+                    return false;
+                }
+            }
+
+            if (!sBotTestMgr->QueueQuest(questId, issuerGuid, botGuid))
+            {
+                handler->PSendSysMessage("Quest %u is already queued.", questId);
+                handler->SetSentErrorMessage(true);
+                return false;
+            }
+            handler->PSendSysMessage("Queued quest %u '%s'. The result is announced here and kept in .playerbots test results.",
+                questId, quest->GetTitle().c_str());
+            return true;
+        }
+
+        if (action == "zone")
+        {
+            uint32 zoneId = uint32(atoi(first.c_str()));
+            if (!zoneId && issuer)
+                zoneId = issuer->GetZoneId();
+            if (!zoneId)
+            {
+                handler->SendSysMessage("Usage: .playerbots test zone [zone id] (your own zone when left out)");
+                handler->SetSentErrorMessage(true);
+                return false;
+            }
+            uint32 const queued = sBotTestMgr->QueueZone(zoneId, issuerGuid);
+            handler->PSendSysMessage("Queued %u quest(s) of zone %u; %u run at a time.",
+                queued, zoneId, sPlayerbotMgr->GetTestMaxConcurrent());
+            return true;
+        }
+
+        if (action == "stop")
+        {
+            handler->PSendSysMessage("Dropped %u queued or running test(s).", sBotTestMgr->StopAll());
+            return true;
+        }
+
+        if (action == "results")
+        {
+            std::vector<BotTestResult> results;
+            sBotTestMgr->GetResults(results);
+            bool const failsOnly = first == "fail";
+            uint32 shown = 0;
+            for (auto itr = results.rbegin(); itr != results.rend() && shown < 20; ++itr)
+            {
+                if (failsOnly && itr->outcome != BotTestOutcome::Fail)
+                    continue;
+                Quest const* quest = sObjectMgr->GetQuestTemplate(itr->questId);
+                handler->PSendSysMessage("%s quest %u '%s'%s%s", BotTestMgr::OutcomeName(itr->outcome), itr->questId,
+                    quest ? quest->GetTitle().c_str() : "?", itr->message.empty() ? "" : " - ", itr->message.c_str());
+                ++shown;
+            }
+            if (!shown)
+                handler->SendSysMessage("No test results yet.");
+            return true;
+        }
+
+        if (action == "status")
+        {
+            uint32 pass = 0;
+            uint32 fail = 0;
+            uint32 skipped = 0;
+            sBotTestMgr->GetCounts(pass, fail, skipped);
+            std::vector<std::string> running;
+            sBotTestMgr->GetRunning(running);
+            handler->PSendSysMessage("Bot tests: %u queued, %u running. Since startup: %u passed, %u failed, %u skipped.",
+                sBotTestMgr->GetQueuedCount(), uint32(running.size()), pass, fail, skipped);
+            for (std::string const& line : running)
+                handler->PSendSysMessage("  %s", line.c_str());
+            return true;
+        }
+
+        handler->SendSysMessage("Usage: .playerbots test quest <id> [bot] | zone [id] | status | results [fail] | stop");
+        handler->SetSentErrorMessage(true);
+        return false;
     }
 
     static bool HandlePlayerbotListCommand(ChatHandler* handler, char const* /*args*/)
