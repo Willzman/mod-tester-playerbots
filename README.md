@@ -1,165 +1,191 @@
-# mod-tester-playerbots (SkyFire)
+# mod-tester-playerbots
 
-A port of the AzerothCore playerbots system to SkyFire (World of Warcraft
-5.4.8 / Mists of Pandaria), intended to populate a test server with bot players
-so features such as LFG, LFR, random battlegrounds, arenas and open-world
-activity can be exercised without a large human population.
+Player bots for SkyFire (World of Warcraft 5.4.8, Mists of Pandaria) that double
+as play-testers. Bots log in as real characters, quest, run dungeons with you,
+queue for battlegrounds and arenas, and write down what is broken on the server
+while they do it.
 
-**Command reference:** see [COMMANDS.md](COMMANDS.md) for every GM slash
-command and whisper/party order (including what is *not* ported yet, such as
-`co` / `nc`).
+It is a port of the AzerothCore [mod-playerbots](https://github.com/mod-playerbots/mod-playerbots)
+idea to SkyFire. The behaviour is modeled on that module; the code is written
+against the 5.4.8 core.
 
-Upstream references:
+* [COMMANDS.md](COMMANDS.md): every command and order in full detail.
+* [PORTING.md](PORTING.md): what has been ported and how.
+* [PORT_BACKLOG.md](PORT_BACKLOG.md): what is left, in priority order.
+* [conf/playerbots.conf.dist](conf/playerbots.conf.dist): every setting, with its default.
 
-* Core fork:  https://github.com/mod-playerbots/azerothcore-wotlk/tree/Playerbot
-* Module:     https://github.com/mod-playerbots/mod-playerbots
-* AC command wiki: https://github.com/mod-playerbots/mod-playerbots/wiki/Playerbot-Commands
+## What the bots do
 
-## Status
+* **Play**: all 34 specializations have a combat or healing rotation. Bots
+  follow, assist, tank, heal, interrupt, dispel, loot, roll, rest, repair, sell,
+  mount and equip upgrades.
+* **Quest on their own**: accept, kill, loot, use quest objects, open quest
+  chests, talk to quest NPCs, travel to the turn-in and hand in.
+* **Group content**: answer dungeon finder role checks and proposals, fill your
+  dungeon queue, enter battlegrounds and arenas and fight there.
+* **Test the server**: record quests that cannot be accepted, advanced or turned
+  in, objectives that are not spawned, kills without credit, places they cannot
+  path through and spells that never cast. Run a quest or a whole zone on
+  demand and report pass or fail with the step that failed.
 
-This module is being ported in phases. What is present today:
+Not done yet: battleground objectives (bots brawl, they do not carry flags),
+raid finder, boss mechanics, and quests that need an item used or an area
+explored. See [PORT_BACKLOG.md](PORT_BACKLOG.md).
 
-* Integrated into SkyFire's new module system (builds + links automatically).
-* Configuration (`playerbots.conf.dist`) and a `PlayerbotMgr` that reads it.
-* Phase 1 core hooks: socketless bot `WorldSession`, synchronous character
-  login, and a per-player tick hook (`PlayerScript::OnUpdate`).
-* GM commands and chat orders — full tables in [COMMANDS.md](COMMANDS.md).
-* Basic bot AI: follow/assist when grouped, combat fillers, LFG role/proposal
-  answers, solo wander, auto-accept trade/duel, corpse loot, and opportunistic
-  free repair near repair NPCs.
-* Self-bot mode (`.playerbots self`): you move, AI casts fillers / Wave-1
-  per-spec rotations (Ret, WW, BM, Shadow, Affliction, Elemental).
-* Per-spec rotation framework under `src/rotations/` (Hekili `.simc` as offline
-  reference).
+## Install
 
-### Play-testers
+1. Put this repository in your SkyFire source tree as `modules/mod-playerbots`
+   and build as usual. The module system compiles and links it automatically.
+2. Copy `conf/playerbots.conf.dist` to `playerbots.conf` next to
+   `worldserver.conf` and set `Playerbots.Enable = 1`.
+3. Start the server. The two module tables (`playerbots_findings`,
+   `playerbots_preferred_mounts`, both in the characters database) are created
+   on startup; the same schema is in `sql/characters/` for manual use.
 
-The bots double as play-testers for the server:
+## Quick start
 
-* **Findings**: while random bots quest on their own, they record what goes
-  wrong (quests that cannot be accepted, finished or turned in, objectives that
-  are not spawned, kills without credit, places they cannot path through, spells
-  that never cast) in the characters table `playerbots_findings`. List them in
-  game with `.playerbots findings`, jump to one with `.playerbots findings go <id>`.
-* **Directed tests**: `.playerbots test quest <id>` has a bot play one quest from
-  its starter to the turn-in and report PASS / FAIL with the step that failed;
-  `.playerbots test zone` queues every solo quest of a zone.
-* `Playerbots.Tester.ActiveBots` bots keep playing when no real player is around.
+```
+.playerbots create                 make the bot accounts and characters from the config
+.playerbots status                 how many bots are online
+.playerbots add Somechar           log one of your own characters in as a bot
+/invite Somechar                   bots accept invites; then order them in /p or by whisper
+.playerbots test quest 783         have a bot play quest 783 and report PASS or FAIL
+.playerbots findings               what the bots have found wrong so far
+```
 
-Details, the finding types and the limits are in [COMMANDS.md](COMMANDS.md#play-tester);
-settings are the `Playerbots.Tester.*` keys.
+For a pool of random bots set `Playerbots.RandomBots.Enable = 1`,
+`Playerbots.RandomBots.MaxBots`, and the `Playerbots.AutoCreate.*` keys, then run
+`.playerbots create` (or set `Playerbots.AutoCreate.OnStartup = 1`).
 
-### Self-bot mode
+## GM commands
 
-`.playerbots self` attaches AI to **your** character without replacing the
-client session:
+All start with `.playerbots` and need GM permission.
 
-* You move and jump as normal until you whisper yourself `nc +walk`.
-* In combat the AI picks a target (selection / attackers / `attack` order) and
-  casts the class filler when you are in range with LoS.
-* `nc +walk` / `co +walk` (and `-walk`) lets the bot path to loot, to the right
-  target, and out of bad ground, then gives you the keys back while it is idle.
-  See [COMMANDS.md](COMMANDS.md).
-* `.playerbots init` refreshes gear and spec. On yourself: `.playerbots init`
-  or `.playerbots init self`. Whisper a bot `autogear` to upgrade its gear for
-  its current spec, or `maintenance` to refresh spells/talents/glyphs/mounts,
-  enchant and gem its gear and repair (see [COMMANDS.md](COMMANDS.md)).
+### Bots
 
-Toggle again or `.playerbots self off` to detach.
+| Command | What it does |
+| --- | --- |
+| `status` | Module state, bot counts, pending logins, activity throttle. |
+| `list` | Names and GUIDs of the bots online. |
+| `add <name>` | Log an offline character in as a bot. |
+| `remove <name>` | Log that bot out. |
+| `summon` | Teleport the bots in your group to you. |
+| `create` | Create the bot accounts and characters the config asks for. Safe to repeat. |
+| `wipe confirm` | Delete every bot account and its characters. |
+| `reload` | Re-read `playerbots.conf` and the bot pool. |
+| `init [<name>\|all\|self] [tank\|healer\|dps\|<spec>] [rare\|epic\|…] [relevel] [tele]` | Re-apply spec, talents, glyphs, spells and gear. `relevel` rolls a new level from the config band, `tele` scatters the bot to a spot that fits its level and faction. |
+| `self [on\|off]` | Put the bot AI on your own character: you move, it fights. |
 
-### Bot auto-creation
+### Play-tester
 
-The auto-creator provisions dedicated bot accounts and fills them with
-characters, so you do not have to create bot accounts/characters by hand. It is
-driven entirely by the `Playerbots.AutoCreate.*` keys and is **incremental and
-idempotent** - existing accounts and characters are reused, only the missing
-ones are created.
+| Command | What it does |
+| --- | --- |
+| `findings [<type>] [<page>]` | List what the bots found, most hits first. |
+| `findings types` | The type names you can filter by. |
+| `findings go <id>` | Teleport yourself to where a finding was first met. |
+| `findings clear <id\|all>` | Delete one finding or all of them. A finding comes back if a bot meets it again. |
+| `test quest <id> [<bot>]` | A bot plays the quest from its starter to the turn-in and reports `PASS`, `FAIL` or `SKIPPED`. |
+| `test zone [<zone id>]` | Queue every solo quest of a zone (your own zone when left out). |
+| `test status` | Queued and running tests, and the totals since startup. |
+| `test results [fail]` | The last 20 results, or the last 20 failures. |
+| `test stop` | Drop the queue and abort running tests. |
 
-* Accounts are named `<AccountPrefix><n>` (e.g. `RNDBOT1` .. `RNDBOTn`) up to
-  `Playerbots.AutoCreate.AccountCount`. New accounts get the realm's expansion
-  so every race/class is available.
-* Each account is filled to `Playerbots.AutoCreate.CharactersPerAccount`
-  characters. For each character the faction is chosen by `AlliancePct`, the role
-  by `TankPct` / `HealerPct` (remainder become DPS), and a class capable of that
-  role plus a valid race for the faction are selected. Characters are created at
-  `Playerbots.AutoCreate.Level`. Death Knights and neutral Pandaren are skipped.
-* If the start level is at least 10, the character is given the specialization
-  matching its rolled role (e.g. a tank Warrior gets Protection) and learns the
-  spells that spec grants for its level, so it can actually fill the role. Use
-  `.playerbots init` to re-apply this later (after leveling, respec, etc.).
+A failed test names the step, for example
+`FAIL - objectives: no progress in 300s on - kill 299 'Young Wolf' 3/8 (4 kill(s) gave no credit)`.
+`SKIPPED` means the quest could not be exercised: no bot may take it, or an
+objective needs something a bot cannot do. Results are kept until the server
+restarts; failures are also stored as findings.
 
-Run it on demand with `.playerbots create`, or set
-`Playerbots.AutoCreate.OnStartup = 1` to run it once when the world boots. Newly
-created characters are picked up by the random-bot pool automatically.
+### Finding types
 
-### Gear and role changes (`.playerbots init`)
+| Type | Meaning |
+| --- | --- |
+| `quest-no-starter`, `quest-no-ender` | No creature or object starts or ends the quest. |
+| `starter-no-spawn`, `ender-no-spawn` | The quest giver exists but is not spawned anywhere a bot can go. |
+| `starter-missing`, `ender-missing` | The quest giver is spawned in the database but was not at its spawn point. |
+| `accept-failed`, `turnin-failed` | The quest giver refused, or the quest log did not change. |
+| `objective-no-spawn` | A kill objective whose creature is not in the `creature` table. Scripted summons show up here too. |
+| `kill-no-credit` | The bot killed the objective creature and the counter did not move. |
+| `interact-no-credit` | The bot used the objective's object, or talked to its NPC, three times with no progress. |
+| `quest-stalled` | No objective progress for `Playerbots.Tester.QuestStallMinutes` while the bot was at the objective. |
+| `questgiver-no-quests` | A creature with the questgiver flag that starts and ends no quest. |
+| `path-failed`, `stuck` | No path to a destination, or the bot stopped making headway. One row per 50-yard cell. |
+| `bad-position` | The bot stood where its map has no ground. |
+| `spell-never-casts` | The rotation picked a ready spell 8 times in a row and the cast never started. |
 
-`.playerbots init` re-gears an active bot for its **current level** and spec
-(level is unchanged unless you pass `relevel`):
+A finding is a lead, not a verdict. The hit count is how often bots ran into
+it; a dozen hits from different bots is worth more than one.
 
-* Existing equipment is preserved until a replacement is successfully equipped; each slot is filled
-  with the best uncommon-to-epic item the bot can equip, biased toward the
-  spec's primary stat (STR/AGI/INT). Armor slots prefer the heaviest armor type
-  the class can wear at that level; weapons/shields/off-hands/ranged are chosen
-  per class and role. Re-run it after leveling to pull in level-appropriate
-  upgrades (e.g. gear a fresh level-80 bot).
-* Optional `relevel` rolls a new level in `AutoCreate.MinLevel`–`MaxLevel`
-  (set Min=Max for a fixed level), then gears for that level.
-* Optional `tele` / `teleport` scatters the bot to a level- and faction-safe
-  open-world anchor **after** gear (and after `relevel` if used), so the
-  destination matches the bot’s final level. Levels 1–5 go to homebind /
-  race spawn instead of a random hub.
-* First-time gear on create / first login also scatters when
-  `Playerbots.AutoCreate.TeleportOnInit = 1` (default), except levels 1–5
-  which stay at their normal starting area.
-* Learns remaining **class trainer** spells for the bot's level, plus SkillLine /
-  specialization spells.
-* Teaches **riding** by level (20/40/60/70/80) and one random mount per unlocked
-  tier (normal ground, swift ground, flying, epic flying) from faction pools.
-* Add a role token (`tank`/`healer`/`dps`) to change the bot's spec first, then
-  re-gear for the new role - e.g. `.playerbots init Arix tank`.
+## Orders
 
-What is **not** implemented yet (tracked in `PORTING.md`):
+Whisper a bot, or say the order in party or raid chat so every bot in the group
+hears it. Prefix a party order with `@tank`, `@heal`, `@dps` or `@ranged` to
+address one role: `/p @tank pull`.
 
-* Mounts (learn/use a default ground/flying mount).
-* Vendor sell-junk, rest/eat/drink, gossip/quest NPC interaction.
-* Deeper per-spec combat rotations.
-* Full AC-style `co`/`nc` strategy engine, RTSC, loot-lists, item/vendor chat ops.
-* Battleground objectives (bots queue, enter and fight, but do not carry flags
-  or take bases), and the automated LFR / rated battleground queues.
+| Order | What it does |
+| --- | --- |
+| `help` | List the orders. |
+| `follow` / `come`, `stay` | Follow the leader, or hold position. |
+| `summon`, `flee` | Teleport to you; `flee` also drops combat orders. |
+| `leave` | Leave the group. |
+| `attack`, `tank attack`, `dps attack` | Attack your target: everyone, tanks first, or damage dealers. |
+| `pull` | Tanks pull your target or the marked one. |
+| `rti <icon>` | Which raid icon bots focus (default skull). |
+| `passive`, `aggressive` | Only fight back, or assist normally again. |
+| `grind` | Attack anything hostile nearby. |
+| `reset` | Clear orders and go back to the role defaults. |
+| `heal`, `healer dps`, `save mana [off]` | Healer modes. |
+| `eat` / `drink` | Sit and recover. |
+| `quests` / `accept` / `turn in` | Use nearby quest givers. |
+| `quests all\|completed\|incompleted\|summary` | Whisper the quest log. |
+| `go [here\|x y z\|<name>]`, `position save\|go <name>` | Walk somewhere on the current map, or save and reuse a spot. |
+| `sell`, `sell all` | Sell grey junk, or greens and better too; repairs at the same vendor. |
+| `mount`, `dismount`, `mount prefer <spell>\|clear` | Mount up, or set a favourite mount. |
+| `gossip [<n>]` | List or pick an NPC's gossip options. |
+| `autogear [reset] [match\|<quality>\|<item level>]` | Upgrade gear for the current spec. |
+| `equip upgrades` | Equip anything in the bags that is better than what is worn. |
+| `maintenance` | Refresh spells, talents, glyphs, mounts, bags, enchants and gems, and repair. |
+| `debug [on\|off]` | Say each combat action in chat. |
 
-To try it: set `Playerbots.Enable = 1`, then `.playerbots add <charname>` for a
-character that is offline. The bot appears in the world at its saved location.
+### Strategies
 
-## Building
+`co` (combat) and `nc` (non-combat) switch behaviours on and off, AzerothCore
+style: `co +aoe`, `nc -loot`, `co ?` to list. Several at once:
+`nc +follow,-grind`.
 
-Nothing special is required. With the SkyFire module system enabled
-(`-DMODULES=1`, the default), this folder is compiled into the `modules`
-library and linked into `worldserver` automatically.
+| | Strategies |
+| --- | --- |
+| `co` | `tank`, `tank assist`, `dps`, `dps assist`, `threat`, `heal`, `healer dps`, `save mana`, `wait for attack`, `aoe`, `boost`, `cc`, `avoid aoe`, `passive`, `grind`, `debug` |
+| `nc` | `follow`, `stay`, `food`, `loot`, `quests`, `heal`, `passive`, `grind` |
+| both | `walk` (self-bot only: lets the AI move your character to loot, to its target and out of bad ground) |
 
-## Configuration
+Strategies that do not fit the bot's role are refused, so `/p co +healer dps`
+only changes healers.
 
-Copy `playerbots.conf.dist` to `playerbots.conf` next to `worldserver.conf`
-(the build also stages a copy next to the binary) and set `Playerbots.Enable = 1`.
+## Settings worth knowing
 
-## Database (SQL)
+Every key is documented in [conf/playerbots.conf.dist](conf/playerbots.conf.dist).
 
-Module SQL lives under `sql/` and is **not** applied by the core updater. Apply
-files to the matching database:
+| Key | Default | What it controls |
+| --- | --- | --- |
+| `Playerbots.Enable` | 0 | The whole module. |
+| `Playerbots.RandomBots.Enable`, `.MaxBots` | 0, 0 | The pool of random bots kept online. |
+| `Playerbots.AutoCreate.*` | | How many bot accounts and characters to create, their levels, faction and role mix. |
+| `Playerbots.Activity.Enable` | 1 | Bots far from any real player slow down or freeze to save server time. |
+| `Playerbots.Tester.Enable` | 1 | Record findings. |
+| `Playerbots.Tester.ActiveBots` | 10 | Random bots that keep playing with no real player near them. |
+| `Playerbots.Tester.QuestStallMinutes` | 20 | Questing time without progress before a quest is dropped (and reported, if the bot was at the objective). |
+| `Playerbots.Tester.MaxConcurrentTests` | 5 | Directed tests running at once. |
+| `Playerbots.Quest.TeleportDistance` | 300 | Questing bots teleport to objectives farther than this, or on another map. 0 = walk only. |
+| `Playerbots.RandomBotJoinLfg` | 0 | Random bots fill your dungeon finder queue. |
+| `Playerbots.RandomBotJoinBG` | 0 | Random bots queue on both sides of a battleground you queue for. |
+| `Playerbots.RandomBotJoinArena` | 0 | Random bots form a team against your arena group. |
 
-| Path | Database |
-|------|----------|
-| [`sql/characters/playerbots_preferred_mounts.sql`](sql/characters/playerbots_preferred_mounts.sql) | **characters** |
-| [`sql/characters/playerbots_findings.sql`](sql/characters/playerbots_findings.sql) | **characters** |
+Bots in your own group answer dungeon finder checks and take battleground and
+arena invitations whatever the three fill settings say.
 
-Both tables are also created at runtime with `CREATE TABLE IF NOT EXISTS` on
-module load, so a fresh characters DB will not error. Keep the SQL files for
-tooling, backups, and manual apply.
+## Tests
 
-## Why this is a port, not a drop-in
-
-The upstream module targets AzerothCore, which is WotLK (3.3.5a). SkyFire is
-MoP (5.4.8): the class/spell system, talent trees, LFG internals, packet/opcode
-layout, and many core APIs differ substantially. Upstream also requires a
-*forked core* with extra hooks, so a straight copy does not compile. `PORTING.md`
-describes the staged approach used here.
+`python3 tests/test_gear_replacement.py` and `python3 tests/test_spawn_index.py`
+compile a function from the real source against stubs. They need a C++
+compiler and nothing else.
