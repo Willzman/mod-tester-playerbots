@@ -30,11 +30,13 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 class Object;
 class Player;
 class Unit;
 class Creature;
+class GameObject;
 class BotAiEngine;
 class SpellInfo;
 class Item;
@@ -544,6 +546,27 @@ private:
     bool TravelToSpawn(BotSpawn const& spawn);
     bool TravelToQuestEnder();
     void AbandonQuest(uint32 questId);
+
+    // --- Objectives that are not kills (PlayerbotAIQuestObjects.cpp) ---
+    struct QuestInteractTarget
+    {
+        uint32 questId = 0;
+        uint32 entry = 0;
+        bool gameobject = false;
+        // A chest that may hold a quest item: an empty one is no problem.
+        bool container = false;
+    };
+    struct QuestInteractTries
+    {
+        uint32 signature = 0;
+        uint8 tries = 0;
+    };
+    // Objects to use, chests to open and NPCs to talk to for the open objectives.
+    void CollectQuestInteractTargets(std::vector<QuestInteractTarget>& out) const;
+    // Walks to the nearest of them and uses it. True when it used this tick.
+    bool HandleQuestObjects();
+    bool UseQuestObject(GameObject* object);
+    bool TalkToQuestNpc(Creature* npc, uint32 questId);
     // Nobody resurrects a bot that dies alone: it gets up where it fell after
     // a while, and a directed test gives up after a few deaths.
     void HandleSoloDeath(uint32 diff);
@@ -562,6 +585,13 @@ private:
     // Complete quest -> trips made to its ender / ticks spent waiting next to it.
     std::unordered_map<uint32, uint32> _enderTrips;
     std::unordered_map<uint32, uint32> _enderWaits;
+    // Object / NPC GUID -> getMSTime() before which it is not used again.
+    std::unordered_map<uint64, uint32> _questObjectRetry;
+    // Entry -> uses in a row that did not advance its quest.
+    std::unordered_map<uint32, QuestInteractTries> _questInteractTries;
+    // The object or NPC being walked to, and for how many AI ticks.
+    uint64 _questApproachGuid = 0;
+    uint32 _questApproachTicks = 0;
     float _travelLastX = 0.0f;
     float _travelLastY = 0.0f;
     uint32 _travelStillMs = 0;

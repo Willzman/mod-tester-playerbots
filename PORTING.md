@@ -299,9 +299,14 @@ for future updates.
 * [DONE] Solo bots get up 30 s after dying in the open world; before, a bot that
   died alone stayed dead. `Playerbots.Tester.ActiveBots` random bots are exempt
   from the activity throttle so they play with no real player around.
-* [TODO] Tester: objectives that need an object used, an NPC talked to, an item
-  used or an area explored (bots only kill and loot); item objectives that drop
-  from gameobjects or reference loot; dungeon runs without a human leader.
+* [DONE] **Objectives that are not kills** (`PlayerbotAIQuestObjects.cpp`, after AC's
+  `NewRpgBaseAction` quest interaction): bots use objective gameobjects
+  (`GameObject::Use`), open chests that hold a quest item and take the loot, and
+  talk to objective NPCs (gossip hello, then the first plain gossip option).
+  Three uses without progress are an `interact-no-credit` finding.
+* [TODO] Tester: objectives that need an item used, a spell cast, an area explored
+  or an escort; objects that only credit through a cast bar or lock; item
+  objectives behind reference loot; dungeon runs without a human leader.
 * [TODO] LFR: bots fill raid finder queues (auto-accept the LFR prompt/roles).
 * [TODO] Random battlegrounds / rated battlegrounds and arenas.
 * [TODO] Open-world grinding population polish (TravelNode / full quest graph still

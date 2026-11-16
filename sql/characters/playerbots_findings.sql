@@ -21,6 +21,7 @@
 --   14 stuck                 map, 50-yard position cell
 --   15 bad-position          map, 50-yard position cell
 --   16 spell-never-casts     spell, specialization
+--   17 interact-no-credit    quest, object or NPC entry
 -- map/zone/position_* are where the first bot met the problem; first_seen and
 -- last_seen are unix timestamps; bot is the last reporter.
 

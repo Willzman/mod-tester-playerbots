@@ -47,6 +47,9 @@ public:
     // Creature entries whose own loot table holds the quest objective item.
     std::vector<uint32> const& GetItemDroppers(uint32 itemId) const;
 
+    // Chest gameobject entries whose own loot table holds the quest objective item.
+    std::vector<uint32> const& GetItemContainers(uint32 itemId) const;
+
     // Creature entries that credit a kill objective through creature_template
     // KillCredit (the objective entry itself is not included).
     std::vector<uint32> const& GetKillCreditSources(uint32 objectiveEntry) const;
@@ -73,6 +76,7 @@ private:
     EntryMap _creatureStarters;
     EntryMap _gameobjectStarters;
     EntryMap _itemDroppers;
+    EntryMap _itemContainers;
     EntryMap _killCreditSources;
 };
 

@@ -6606,6 +6606,8 @@ bool PlayerbotAI::HandleAutoQuesting()
 
     if (_quests || _forceQuest)
     {
+        if (HandleQuestObjects())
+            return true;
         if (TravelToQuestEnder())
             return true;
         if (TravelToQuestObjective())

@@ -56,6 +56,7 @@ namespace
         { BotFindingType::Stuck,                 "stuck",                Subject::Map,      "bot stopped making headway" },
         { BotFindingType::BadPosition,           "bad-position",         Subject::Map,      "bot stood where the map has no ground" },
         { BotFindingType::SpellNeverCasts,       "spell-never-casts",    Subject::Spell,    "the rotation picks it but the cast never starts" },
+        { BotFindingType::QuestInteractNoCredit, "interact-no-credit",   Subject::Quest,    "using the object or talking to the NPC advanced nothing" },
     };
 
     TypeInfo const* FindTypeInfo(BotFindingType type)

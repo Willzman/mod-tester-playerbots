@@ -47,6 +47,7 @@ enum class BotFindingType : uint8
     Stuck                   = 14, // subject map, detail position cell
     BadPosition             = 15, // subject map, detail position cell
     SpellNeverCasts         = 16, // subject spell, detail specialization
+    QuestInteractNoCredit   = 17, // subject quest, detail object or NPC entry
     Max
 };
 

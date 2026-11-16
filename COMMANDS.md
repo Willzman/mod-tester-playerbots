@@ -55,14 +55,16 @@ empty realm too.
 | `path-failed` / `stuck` | No path to a destination / the bot stopped making headway on the way. One row per 50-yard cell. |
 | `bad-position` | The bot stood where its map has no ground, or a spawn point it could not be teleported to. |
 | `spell-never-casts` | The rotation picked a known, ready spell 8 times in a row and the cast never started. |
+| `interact-no-credit` | The bot used the objective's object, or talked to its NPC, three times and the quest did not advance. |
 
-A finding is a lead, not a verdict: bots only kill and loot, so a quest that
-needs an object used or an area explored is dropped without a finding, and a
-single hit is worth less than a dozen from different bots.
+A finding is a lead, not a verdict: bots kill, loot, use objects, open chests
+and talk to NPCs, so a quest that needs an item used, an area explored or an
+escort is dropped without a finding, and a single hit is worth less than a
+dozen from different bots.
 
 **Directed tests.** `.playerbots test quest <id>` hands the quest to an idle
 random bot (or the named bot). The bot is teleported to the starter, accepts,
-kills and loots for the objectives, travels to the ender and turns in. The
+kills, loots, uses objects and talks to NPCs for the objectives, travels to the ender and turns in. The
 result names the step that failed, for example
 `FAIL - objectives: no progress in 300s on - kill 299 'Young Wolf' 3/8 (4 kill(s) gave no credit)`.
 

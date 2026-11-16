@@ -47,6 +47,7 @@ void BotSpawnIndex::LoadSpawns(char const* table, RowVec& rows)
 void BotSpawnIndex::LoadItemDroppers()
 {
     _itemDroppers.clear();
+    _itemContainers.clear();
 
     std::set<uint32> items;
     for (auto const& kv : sObjectMgr->GetQuestTemplates())
@@ -75,13 +76,28 @@ void BotSpawnIndex::LoadItemDroppers()
             "SELECT ct.entry, clt.item FROM creature_loot_template clt "
             "JOIN creature_template ct ON ct.lootid = clt.entry "
             "WHERE clt.mincountOrRef > 0 AND clt.item IN (%s)", ids.str().c_str());
-        if (!result)
-            continue;
-        do
+        if (result)
         {
-            Field* fields = result->Fetch();
-            _itemDroppers[fields[1].GetUInt32()].push_back(fields[0].GetUInt32());
-        } while (result->NextRow());
+            do
+            {
+                Field* fields = result->Fetch();
+                _itemDroppers[fields[1].GetUInt32()].push_back(fields[0].GetUInt32());
+            } while (result->NextRow());
+        }
+
+        // Chests (gameobject type 3) keep their loot id in data1.
+        result = WorldDatabase.PQuery(
+            "SELECT gt.entry, glt.item FROM gameobject_loot_template glt "
+            "JOIN gameobject_template gt ON gt.type = 3 AND gt.data1 = glt.entry "
+            "WHERE glt.mincountOrRef > 0 AND glt.item IN (%s)", ids.str().c_str());
+        if (result)
+        {
+            do
+            {
+                Field* fields = result->Fetch();
+                _itemContainers[fields[1].GetUInt32()].push_back(fields[0].GetUInt32());
+            } while (result->NextRow());
+        }
     }
 }
 
@@ -111,8 +127,9 @@ void BotSpawnIndex::Load()
     _loaded = true;
 
     SF_LOG_INFO("modules",
-        "[mod-playerbots] BotSpawnIndex: %u creature and %u gameobject spawns, %u quest items with a creature drop.",
-        uint32(_creatures.size()), uint32(_gameobjects.size()), uint32(_itemDroppers.size()));
+        "[mod-playerbots] BotSpawnIndex: %u creature and %u gameobject spawns, quest items: %u dropped by creatures, %u held by chests.",
+        uint32(_creatures.size()), uint32(_gameobjects.size()), uint32(_itemDroppers.size()),
+        uint32(_itemContainers.size()));
 }
 
 bool BotSpawnIndex::HasSpawn(uint32 entry, bool gameobject) const
@@ -194,4 +211,9 @@ std::vector<uint32> const& BotSpawnIndex::GetItemDroppers(uint32 itemId) const
 std::vector<uint32> const& BotSpawnIndex::GetKillCreditSources(uint32 objectiveEntry) const
 {
     return Lookup(_killCreditSources, objectiveEntry);
+}
+
+std::vector<uint32> const& BotSpawnIndex::GetItemContainers(uint32 itemId) const
+{
+    return Lookup(_itemContainers, itemId);
 }

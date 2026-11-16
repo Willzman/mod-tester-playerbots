@@ -310,15 +310,18 @@ std::string PlayerbotAI::DescribeOpenObjective(Quest const* quest, bool& support
             out << "kill " << EntryLabel(open->ObjectId, false);
             break;
         case QUEST_OBJECTIVE_TYPE_ITEM:
-            supported = !sBotSpawnIndex->GetItemDroppers(open->ObjectId).empty();
+            supported = !sBotSpawnIndex->GetItemDroppers(open->ObjectId).empty()
+                || !sBotSpawnIndex->GetItemContainers(open->ObjectId).empty();
             out << "collect item " << open->ObjectId;
             if (!supported)
-                out << " (no creature drops it directly)";
+                out << " (no creature drops it and no chest holds it directly)";
             break;
         case QUEST_OBJECTIVE_TYPE_GO:
+            supported = true;
             out << "use object " << EntryLabel(open->ObjectId, true);
             break;
         case QUEST_OBJECTIVE_TYPE_NPC_INTERACT:
+            supported = true;
             out << "talk to " << EntryLabel(open->ObjectId, false);
             break;
         default:
@@ -374,35 +377,41 @@ bool PlayerbotAI::FindObjectiveSpawn(Quest const* quest, BotSpawn& out) const
     if (slot >= MAX_QUEST_LOG_SIZE)
         return false;
 
-    std::vector<uint32> entries;
+    // Entry, and whether it is a gameobject.
+    std::vector<std::pair<uint32, bool>> entries;
     for (QuestObjective const* objective : quest->m_questObjectives)
     {
         if (!objective)
             continue;
-        if (objective->Type == QUEST_OBJECTIVE_TYPE_NPC)
-        {
-            if (_bot->GetQuestSlotCounter(slot, objective->Index) >= ObjectiveNeed(objective))
-                continue;
-            entries.push_back(objective->ObjectId);
-            std::vector<uint32> const& sources = sBotSpawnIndex->GetKillCreditSources(objective->ObjectId);
-            entries.insert(entries.end(), sources.begin(), sources.end());
-        }
-        else if (objective->Type == QUEST_OBJECTIVE_TYPE_ITEM)
+        if (objective->Type == QUEST_OBJECTIVE_TYPE_ITEM)
         {
             if (_bot->GetItemCount(objective->ObjectId, true) >= ObjectiveNeed(objective))
                 continue;
-            std::vector<uint32> const& droppers = sBotSpawnIndex->GetItemDroppers(objective->ObjectId);
-            entries.insert(entries.end(), droppers.begin(), droppers.end());
+            for (uint32 dropper : sBotSpawnIndex->GetItemDroppers(objective->ObjectId))
+                entries.push_back(std::make_pair(dropper, false));
+            for (uint32 container : sBotSpawnIndex->GetItemContainers(objective->ObjectId))
+                entries.push_back(std::make_pair(container, true));
+            continue;
         }
+
+        if (objective->Type != QUEST_OBJECTIVE_TYPE_NPC && objective->Type != QUEST_OBJECTIVE_TYPE_GO
+            && objective->Type != QUEST_OBJECTIVE_TYPE_NPC_INTERACT)
+            continue;
+        if (_bot->GetQuestSlotCounter(slot, objective->Index) >= ObjectiveNeed(objective))
+            continue;
+        entries.push_back(std::make_pair(objective->ObjectId, objective->Type == QUEST_OBJECTIVE_TYPE_GO));
+        if (objective->Type == QUEST_OBJECTIVE_TYPE_NPC)
+            for (uint32 source : sBotSpawnIndex->GetKillCreditSources(objective->ObjectId))
+                entries.push_back(std::make_pair(source, false));
     }
 
     bool found = false;
     bool foundSameMap = false;
     float bestDist = 0.0f;
-    for (uint32 entry : entries)
+    for (auto const& entry : entries)
     {
         BotSpawn spawn;
-        if (!sBotSpawnIndex->FindNearest(entry, false, _bot->GetMapId(), _bot->GetPositionX(),
+        if (!sBotSpawnIndex->FindNearest(entry.first, entry.second, _bot->GetMapId(), _bot->GetPositionX(),
             _bot->GetPositionY(), _bot->GetPositionZ(), false, spawn))
             continue;
 
@@ -1140,7 +1149,7 @@ bool PlayerbotAI::UpdateQuestTest(uint32 elapsed)
             std::ostringstream out;
             out << "objectives: no progress in " << (_test.idleMs / IN_MILLISECONDS) << "s on - " << objective;
             if (!haveSpawn)
-                out << " (nothing to kill for it is spawned)";
+                out << " (nothing for it is spawned)";
             if (_test.killsWithoutCredit)
                 out << " (" << _test.killsWithoutCredit << " kill(s) gave no credit)";
             sBotFindings->Record(haveSpawn ? BotFindingType::QuestStalled : BotFindingType::QuestObjectiveNoSpawn,
@@ -1148,6 +1157,10 @@ bool PlayerbotAI::UpdateQuestTest(uint32 elapsed)
             FinishQuestTest(BotTestOutcome::Fail, out.str());
             return true;
         }
+
+        // Objects to use and NPCs to talk to that are in reach.
+        if (HandleQuestObjects())
+            return true;
 
         // The combat engine pulls objective mobs within its hunt radius; from
         // farther away the test brings the bot to the nearest spawn.
