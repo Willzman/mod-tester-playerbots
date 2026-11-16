@@ -1,4 +1,4 @@
-# mod-playerbots (SkyFire)
+# mod-tester-playerbots (SkyFire)
 
 A port of the AzerothCore playerbots system to SkyFire (World of Warcraft
 5.4.8 / Mists of Pandaria), intended to populate a test server with bot players
