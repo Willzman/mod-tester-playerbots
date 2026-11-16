@@ -176,20 +176,21 @@ void BotFindings::Record(BotFindingType type, uint32 subject, uint32 detail, Pla
 {
     if (!reporter)
         return;
-    RecordInternal(type, subject, detail, reporter,
+    RecordInternal(type, subject, detail, reporter, reporter->GetMapId(),
         reporter->GetPositionX(), reporter->GetPositionY(), reporter->GetPositionZ(), note);
 }
 
 void BotFindings::RecordAt(BotFindingType type, Player const* reporter, float x, float y, float z,
-    std::string const& note)
+    std::string const& note, int32 mapId)
 {
     if (!reporter)
         return;
-    RecordInternal(type, reporter->GetMapId(), PositionCell(x, y), reporter, x, y, z, note);
+    uint32 const map = mapId < 0 ? reporter->GetMapId() : uint32(mapId);
+    RecordInternal(type, map, PositionCell(x, y), reporter, map, x, y, z, note);
 }
 
 void BotFindings::RecordInternal(BotFindingType type, uint32 subject, uint32 detail, Player const* reporter,
-    float x, float y, float z, std::string const& note)
+    uint32 mapId, float x, float y, float z, std::string const& note)
 {
     if (!_enabled || type == BotFindingType::None || type >= BotFindingType::Max)
         return;
@@ -209,8 +210,8 @@ void BotFindings::RecordInternal(BotFindingType type, uint32 subject, uint32 det
         finding.type = type;
         finding.subject = subject;
         finding.detail = detail;
-        finding.mapId = reporter->GetMapId();
-        finding.zoneId = reporter->IsInWorld() ? reporter->GetZoneId() : 0;
+        finding.mapId = mapId;
+        finding.zoneId = reporter->IsInWorld() && reporter->GetMapId() == mapId ? reporter->GetZoneId() : 0;
         finding.x = x;
         finding.y = y;
         finding.z = z;

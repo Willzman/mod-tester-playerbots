@@ -85,8 +85,9 @@ public:
 
     // Position-keyed findings (PathFailed / Stuck / BadPosition): one row per
     // 50-yard cell of a map.
+    // 50-yard cell of a map. mapId < 0 = the reporter's map.
     void RecordAt(BotFindingType type, Player const* reporter, float x, float y, float z,
-        std::string const& note = std::string());
+        std::string const& note = std::string(), int32 mapId = -1);
 
     // World thread: writes changed rows every FLUSH_INTERVAL.
     void Update(uint32 diff);
@@ -111,7 +112,7 @@ private:
     typedef std::tuple<uint8, uint32, uint32> Key;
 
     void RecordInternal(BotFindingType type, uint32 subject, uint32 detail, Player const* reporter,
-        float x, float y, float z, std::string const& note);
+        uint32 mapId, float x, float y, float z, std::string const& note);
 
     bool _enabled = true;
     uint32 _flushTimer = 0;

@@ -1066,7 +1066,7 @@ public:
 
             if (!sBotTestMgr->QueueQuest(questId, issuerGuid, botGuid))
             {
-                handler->PSendSysMessage("Quest %u is already queued.", questId);
+                handler->PSendSysMessage("Quest %u is disabled or already queued.", questId);
                 handler->SetSentErrorMessage(true);
                 return false;
             }

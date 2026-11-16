@@ -70,6 +70,8 @@ bool BotTestMgr::QueueQuest(uint32 questId, uint64 requesterGuid, uint64 botGuid
 {
     if (!sObjectMgr->GetQuestTemplate(questId) || _queue.size() >= MAX_QUEUE)
         return false;
+    if (DisableMgr::IsDisabledFor(DISABLE_TYPE_QUEST, questId, nullptr))
+        return false;
     for (Queued const& job : _queue)
         if (job.questId == questId)
             return false;

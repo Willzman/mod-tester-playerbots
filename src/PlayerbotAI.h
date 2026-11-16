@@ -512,8 +512,8 @@ private:
         uint32 giverEntry = 0;
         bool giverIsObject = false;
         BotSpawn giverSpawn;
-        bool hadQuests = false;
-        bool hadGrind = false;
+        // The bot's strategies before the test, put back when it ends.
+        BotStrategyEngine savedStrategies;
     };
 
     struct QuestWatch
@@ -558,6 +558,10 @@ private:
     std::unordered_map<uint64, uint16> _objectiveCounters;
     // spell id -> casts in a row that did not start; 0xFF once it has cast.
     std::unordered_map<uint32, uint8> _spellFails;
+    std::unordered_map<uint32, uint32> _spellFailMs;
+    // Complete quest -> trips made to its ender / ticks spent waiting next to it.
+    std::unordered_map<uint32, uint32> _enderTrips;
+    std::unordered_map<uint32, uint32> _enderWaits;
     float _travelLastX = 0.0f;
     float _travelLastY = 0.0f;
     uint32 _travelStillMs = 0;

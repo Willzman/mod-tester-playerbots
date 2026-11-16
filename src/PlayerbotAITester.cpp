@@ -22,6 +22,7 @@
 #include "Creature.h"
 #include "CreatureAI.h"
 #include "DBCStores.h"
+#include "DisableMgr.h"
 #include "GameObject.h"
 #include "GameObjectAI.h"
 #include "GossipDef.h"
@@ -51,6 +52,13 @@ namespace
     uint8 const SPELL_HAS_CAST = 0xFF;
     uint32 const TRAVEL_STUCK_MS = 20 * IN_MILLISECONDS;
     uint32 const SOLO_REVIVE_MS = 30 * IN_MILLISECONDS;
+    // Turn-in travel: how close counts as arrived, how long to wait there for
+    // the ender (AI ticks), and how many trips to make before giving up.
+    float const ENDER_ARRIVED_RANGE = 5.0f;
+    uint32 const ENDER_WAIT_TICKS = 20;
+    uint32 const ENDER_MAX_TRIPS = 3;
+    // Failed casts further apart than this are not "in a row".
+    uint32 const SPELL_FAIL_WINDOW_MS = 30 * IN_MILLISECONDS;
     // A bot this close to an objective spawn was on site when its quest stalled.
     float const STALL_SITE_RANGE = 150.0f;
     uint32 const TEST_MAX_DEATHS = 3;
@@ -208,7 +216,11 @@ bool PlayerbotAI::TurnInQuest(Quest const* quest, Object* giver)
     }
 
     if (_bot->GetQuestStatus(questId) != QUEST_STATUS_COMPLETE)
+    {
+        _enderTrips.erase(questId);
+        _enderWaits.erase(questId);
         return true;
+    }
 
     sBotFindings->Record(BotFindingType::QuestTurnInFailed, questId, 0, _bot,
         "every check passed but the quest stayed complete in the log");
@@ -486,8 +498,9 @@ bool PlayerbotAI::TravelToSpawn(BotSpawn const& spawn)
     if (sameMap && (teleportBeyond <= 0.0f || dist <= teleportBeyond))
         return SetTravelDestination(spawn.mapId, spawn.x, spawn.y, spawn.z);
 
-    if (teleportBeyond <= 0.0f)
-        return false;
+    // A grouped bot stays with its party: it walks, or does not go.
+    if (teleportBeyond <= 0.0f || _bot->GetGroup())
+        return sameMap && SetTravelDestination(spawn.mapId, spawn.x, spawn.y, spawn.z);
     if (!IsQuestTesting() && !BotTeleportMaps::CanBotTeleportTo(_bot, spawn.mapId))
         return false;
     if (_bot->IsInCombat() || _bot->IsInFlight() || !_bot->IsAlive())
@@ -519,7 +532,7 @@ void PlayerbotAI::ProcessPendingTeleport()
         std::ostringstream note;
         note << "a spawn point on map " << _pendingTeleport.mapId << " the bot could not be teleported to";
         sBotFindings->RecordAt(BotFindingType::BadPosition, _bot, _pendingTeleport.x, _pendingTeleport.y,
-            _pendingTeleport.z, note.str());
+            _pendingTeleport.z, note.str(), int32(_pendingTeleport.mapId));
         if (IsQuestTesting())
             FinishQuestTest(BotTestOutcome::Fail, std::string(GetTestStepName()) + ": " + note.str());
         return;
@@ -579,13 +592,45 @@ bool PlayerbotAI::TravelToQuestEnder()
         }
 
         // Only creatures are handed in to by HandleQuestNpcs.
-        if (isObject)
+        if (isObject || IsQuestAbandoned(questId))
             continue;
-        if (spawn.mapId == _bot->GetMapId()
-            && _bot->GetExactDist(spawn.x, spawn.y, spawn.z) <= INTERACTION_DISTANCE)
+
+        // Standing at the spawn point (the tolerance travel arrives with) and the
+        // quest is still complete: the ender is not there to take it.
+        float const dx = _bot->GetPositionX() - spawn.x;
+        float const dy = _bot->GetPositionY() - spawn.y;
+        bool const atSpawn = spawn.mapId == _bot->GetMapId() && dx * dx + dy * dy <= ENDER_ARRIVED_RANGE * ENDER_ARRIVED_RANGE;
+        bool giveUp = false;
+        if (atSpawn)
+        {
+            if (++_enderWaits[questId] < ENDER_WAIT_TICKS)
+                return true;
+            sBotFindings->Record(BotFindingType::QuestEnderMissing, questId, entry, _bot);
+            giveUp = true;
+        }
+        else if (_enderTrips[questId] >= ENDER_MAX_TRIPS)
+        {
+            sBotFindings->RecordAt(BotFindingType::PathFailed, _bot, spawn.x, spawn.y, spawn.z,
+                "quest ender " + EntryLabel(entry, false), int32(spawn.mapId));
+            giveUp = true;
+        }
+
+        if (giveUp)
+        {
+            // Not gone back to this session, so the bot gets on with its other quests.
+            _enderTrips.erase(questId);
+            _enderWaits.erase(questId);
+            _abandonedQuests.insert(questId);
+            if (sPlayerbotMgr->ShouldAbandonStalledQuests())
+                AbandonQuest(questId);
             continue;
+        }
+
         if (TravelToSpawn(spawn))
+        {
+            ++_enderTrips[questId];
             return true;
+        }
     }
     return false;
 }
@@ -630,7 +675,7 @@ void PlayerbotAI::HandleSoloDeath(uint32 diff)
     if (!_bot || _clientControlled || _bot->IsAlive())
         return;
     // Grouped bots wait for a resurrection or the leader's summon.
-    if (_bot->GetGroup() || _bot->GetMap()->Instanceable())
+    if ((_bot->GetGroup() && !IsQuestTesting()) || _bot->GetMap()->Instanceable())
         return;
 
     _deadMs += diff;
@@ -708,6 +753,12 @@ void PlayerbotAI::NoteSpellResult(uint32 spellId, bool started)
     }
     if (fails == SPELL_HAS_CAST || fails >= SPELL_FAIL_LIMIT)
         return;
+
+    uint32 const now = getMSTime();
+    uint32& lastFail = _spellFailMs[spellId];
+    if (fails && getMSTimeDiff(lastFail, now) > SPELL_FAIL_WINDOW_MS)
+        fails = 0;
+    lastFail = now;
     if (++fails < SPELL_FAIL_LIMIT)
         return;
 
@@ -744,6 +795,14 @@ void PlayerbotAI::UpdateQuestWatch(uint32 elapsed)
             continue;
         }
 
+        // The clock runs only for the quest the bot is at (or one with nowhere
+        // to go at all), not for the others waiting their turn in the log.
+        BotSpawn spawn;
+        bool const haveSpawn = FindObjectiveSpawn(quest, spawn);
+        if (haveSpawn && (spawn.mapId != _bot->GetMapId()
+            || _bot->GetExactDist(spawn.x, spawn.y, spawn.z) > STALL_SITE_RANGE))
+            continue;
+
         watch.idleMs += elapsed;
         if (!stallMs || watch.idleMs < stallMs)
             continue;
@@ -751,13 +810,10 @@ void PlayerbotAI::UpdateQuestWatch(uint32 elapsed)
         bool supported = false;
         uint32 objectId = 0;
         std::string const objective = DescribeOpenObjective(quest, supported, objectId);
-        BotSpawn spawn;
         if (objectId && !KillObjectiveHasSpawn(objectId))
             sBotFindings->Record(BotFindingType::QuestObjectiveNoSpawn, questId, objectId, _bot,
                 objective + " (not in the creature table: summoned by a script or event?)");
-        // A stall only says something when the bot was where the objective is.
-        else if (supported && FindObjectiveSpawn(quest, spawn) && spawn.mapId == _bot->GetMapId()
-            && _bot->GetExactDist(spawn.x, spawn.y, spawn.z) <= STALL_SITE_RANGE)
+        else if (supported && haveSpawn)
             sBotFindings->Record(BotFindingType::QuestStalled, questId, objectId, _bot, objective);
 
         // A quest the bot cannot work on (use an object, explore) is dropped
@@ -833,9 +889,15 @@ bool PlayerbotAI::StartQuestTest(uint32 questId, uint64 requesterGuid, bool prep
     if (hasQuest && !random)
         return fail("the bot already has or has finished the quest");
 
+    if (DisableMgr::IsDisabledFor(DISABLE_TYPE_QUEST, questId, _bot))
+        return fail("the quest is disabled");
     std::string refusal = TakeQuestRefusal(_bot, quest, false, false);
     if (!refusal.empty())
         return fail(refusal);
+    if (!_bot->SatisfyQuestTimed(quest, false))
+        return fail("the bot is on another timed quest");
+    if (_bot->FindQuestSlot(questId) >= MAX_QUEST_LOG_SIZE && !_bot->SatisfyQuestLog(false))
+        return fail("the quest log is full");
 
     bool const wrongLevel = !_bot->SatisfyQuestLevel(quest, false);
     if (wrongLevel && !(prepare && random))
@@ -875,8 +937,7 @@ bool PlayerbotAI::StartQuestTest(uint32 questId, uint64 requesterGuid, bool prep
     _test.questId = questId;
     _test.requester = requesterGuid;
     _test.startedMs = getMSTime();
-    _test.hadQuests = _strategies.Has("quests", BotState::NonCombat);
-    _test.hadGrind = _strategies.Has("grind", BotState::NonCombat);
+    _test.savedStrategies = _strategies;
 
     // Quest strategy on, grind off: the bot only fights for the test quest.
     _strategies.ChangeStrategy("+quests,-grind,-follow,-stay", BotState::NonCombat);
@@ -897,8 +958,7 @@ void PlayerbotAI::CancelQuestTest()
         return;
 
     uint32 const questId = _test.questId;
-    bool const hadQuests = _test.hadQuests;
-    bool const hadGrind = _test.hadGrind;
+    _strategies = _test.savedStrategies;
     _test = QuestTest();
 
     ClearTravelDestination();
@@ -906,12 +966,6 @@ void PlayerbotAI::CancelQuestTest()
     if (_bot && _bot->FindQuestSlot(questId) < MAX_QUEST_LOG_SIZE)
         AbandonQuest(questId);
 
-    _strategies.ChangeStrategy(hadQuests ? "+quests" : "-quests", BotState::NonCombat);
-    if (hadGrind)
-    {
-        _strategies.Add("grind", BotState::NonCombat);
-        _strategies.Add("grind", BotState::Combat);
-    }
     SyncFlagsFromStrategies();
 }
 
@@ -1020,6 +1074,12 @@ bool PlayerbotAI::UpdateQuestTest(uint32 elapsed)
     if (!quest)
     {
         FinishQuestTest(BotTestOutcome::Fail, "the quest template is gone");
+        return true;
+    }
+
+    if (_bot->GetGroup())
+    {
+        FinishQuestTest(BotTestOutcome::Skipped, std::string(GetTestStepName()) + ": the bot was invited into a group");
         return true;
     }
 
@@ -1190,7 +1250,7 @@ bool PlayerbotAI::UpdateQuestTest(uint32 elapsed)
             return true;
         }
 
-        if (_bot->IsQuestRewarded(_test.questId) && _bot->GetQuestStatus(_test.questId) == QUEST_STATUS_NONE)
+        if (_bot->FindQuestSlot(_test.questId) >= MAX_QUEST_LOG_SIZE)
         {
             FinishQuestTest(BotTestOutcome::Pass, "completed on accept");
             return true;
