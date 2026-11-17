@@ -6,6 +6,7 @@
 #include "PlayerbotMgr.h"
 #include "BotBattlegrounds.h"
 #include "BotFindings.h"
+#include "BotSpawnIndex.h"
 #include "BotTestMgr.h"
 #include "PlayerbotAI.h"
 #include "engine/BotMovement.h"
@@ -49,6 +50,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 PlayerbotMgr* PlayerbotMgr::instance()
@@ -263,6 +265,9 @@ void PlayerbotMgr::LoadConfig()
     if (_saveManaThreshold > 100.0f) _saveManaThreshold = 100.0f;
     if (_waitForAttackSeconds > 30) _waitForAttackSeconds = 30;
 
+    // Rebuild at the world update barrier, never inside a map-worker callback.
+    _questSpawnsReloadPending = true;
+
     // Force a candidate reload so prefix changes take effect on .reload config.
     _candidatesLoaded = false;
 
@@ -275,10 +280,34 @@ void PlayerbotMgr::LoadConfig()
         SF_LOG_INFO("modules", "[mod-playerbots] Disabled via configuration.");
 }
 
+void PlayerbotMgr::LoadQuestSpawns()
+{
+    _questSpawnsReloadPending = false;
+    // One index serves quest travel, directed tests and findings: spawns,
+    // quest starters, kill-credit creatures and the holders of quest items.
+    // Bot AI reads it without SQL; it is only rebuilt here, on the world
+    // thread, while no map is updating.
+    sBotSpawnIndex->Load();
+}
+
 void PlayerbotMgr::Update(uint32 diff)
 {
     if (!_enabled)
         return;
+
+    if (_questSpawnsReloadPending)
+        LoadQuestSpawns();
+
+    // OnWorldUpdate runs after MapManager's update barrier. Map workers read
+    // this snapshot next tick; never modify it from a player/map callback.
+    _realPlayerGuids.clear();
+    for (auto const& entry : sWorld->GetAllSessions())
+    {
+        WorldSession* session = entry.second;
+        Player* player = session && !session->IsBot() ? session->GetPlayer() : nullptr;
+        if (player && player->IsInWorld())
+            _realPlayerGuids.push_back(player->GetGUID());
+    }
 
     // Drop bots whose player has left the world for any reason.
     CleanupDeadBots();

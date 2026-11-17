@@ -184,8 +184,22 @@ Every key is documented in [conf/playerbots.conf.dist](conf/playerbots.conf.dist
 Bots in your own group answer dungeon finder checks and take battleground and
 arena invitations whatever the three fill settings say.
 
+## Spawn index
+
+Quest travel, directed tests and findings read creature and gameobject spawn
+points from an in-memory index built at startup, so bot AI never queries the
+database. After changing spawns, `.playerbots reload` rebuilds it on the world
+thread; the bulk reads can delay that one update, so avoid repeated reloads
+under load. It is a static hint: it knows nothing about phases or what is
+currently alive.
+
 ## Tests
 
 `python3 tests/test_gear_replacement.py` and `python3 tests/test_spawn_index.py`
 compile a function from the real source against stubs. They need a C++
-compiler and nothing else.
+compiler and nothing else. The update-schedule test is plain C++:
+
+```sh
+g++ -std=c++17 -Wall -Wextra -Werror tests/BotUpdateScheduleTests.cpp -o /tmp/bot-update-schedule-test
+/tmp/bot-update-schedule-test
+```
